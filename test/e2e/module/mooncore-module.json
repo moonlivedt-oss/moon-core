@@ -1,0 +1,6 @@
+{
+  "id": "e2e-probe",
+  "name": "E2E-зонд",
+  "version": "1.0.0",
+  "script": "runtime.js"
+}

@@ -1,0 +1,17 @@
+{
+  "name": "moon-core-dev",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Разработка расширения Moon Core (само расширение — в папке extension/).",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/moonlivedt-oss/moon-core.git"
+  },
+  "scripts": {
+    "build": "node scripts/build-runtime.js",
+    "test": "node scripts/build-runtime.js --check && node test/smoke.js && node test/runtime.js",
+    "package": "node scripts/build-runtime.js && node scripts/package-vsix.js",
+    "e2e": "node test/e2e/run.js"
+  }
+}

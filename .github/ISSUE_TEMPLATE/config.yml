@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Вопрос или обсуждение
+    url: https://github.com/moonlivedt-oss/moon-core/discussions
+    about: Общие вопросы, помощь с установкой и идеи для обсуждения — сюда, а не в issue.
+  - name: Уязвимость
+    url: https://github.com/moonlivedt-oss/moon-core/security/advisories/new
+    about: Проблемы безопасности — только приватно (см. SECURITY.md), не публичным issue.

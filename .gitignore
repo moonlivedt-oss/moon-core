@@ -1,0 +1,22 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Node (у расширения зависимостей нет, но на всякий случай)
+node_modules/
+
+# Сборка целиком локальная: .vsix собирается командой npm run package, в истории не нужен.
+dist/
+*.vsix
+
+# Скачанный VS Code и отчёты e2e (npm run e2e) — около гигабайта.
+.vscode-test/
+
+# Логи и временное (в том числе хвосты атомарной записи)
+*.log
+*.tmp
+*.mooncore-tmp
+
+# Кэш линтера ruff — чисто локальный
+.ruff_cache/

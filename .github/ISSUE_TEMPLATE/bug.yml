@@ -1,0 +1,87 @@
+name: Баг
+description: Что-то работает не так, как ожидалось
+title: "[Баг] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо за отчёт! Сначала запусти `Moon Core: Доктор` — он часто находит и чинит причину сам. Кнопка «Скопировать отчёт» там копирует диагностику: её удобно вставить ниже (домашняя папка и токены моста в ней уже вырезаны).
+  - type: textarea
+    id: what
+    attributes:
+      label: Что произошло
+      description: Опиши проблему кратко и по делу.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Как воспроизвести
+      description: Пошагово — что нажимал(а), что открыл(а).
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Что ожидал(а)
+      description: Как должно было быть.
+    validations:
+      required: false
+  - type: input
+    id: ext-version
+    attributes:
+      label: Версия Moon Core
+      description: "Ctrl+Shift+X → Moon Core → номер версии."
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: vscode-version
+    attributes:
+      label: Версия VS Code (или форка)
+      placeholder: "1.139.1 · VS Code / Cursor / VSCodium"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: ОС
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Где проявляется
+      options:
+        - Внедрение / снятие (оболочка VS Code)
+        - Конструктор
+        - Профили вида
+        - Сниппеты
+        - Модули
+        - Другое
+    validations:
+      required: false
+  - type: textarea
+    id: report
+    attributes:
+      label: Отчёт Доктора / журнал
+      description: "`Moon Core: Доктор` → «Скопировать отчёт», или `Moon Core: Показать журнал`."
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Скриншот / GIF
+      description: По возможности приложи изображение — перетащи его прямо сюда.
+    validations:
+      required: false

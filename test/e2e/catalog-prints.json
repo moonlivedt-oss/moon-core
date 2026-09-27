@@ -1,0 +1,500 @@
+{
+  "vscode": "1.139.1",
+  "at": "2026-09-27",
+  "prints": {
+    "banner": {
+      "alts": [
+        "#workbench\\.parts\\.banner"
+      ],
+      "tag": "div",
+      "id": "workbench.parts.banner",
+      "role": "banner",
+      "cls": [
+        "part",
+        "banner"
+      ],
+      "pcls": [
+        "split-view-view"
+      ],
+      "cat": "banner",
+      "whole": true,
+      "one": true
+    },
+    "toasts": {
+      "alts": [
+        "div.notifications-toasts.bottom-right"
+      ],
+      "tag": "div",
+      "cls": [
+        "notifications-toasts",
+        "bottom-right"
+      ],
+      "pcls": [
+        "monaco-enable-motion",
+        "modern-ui",
+        "modern-ui-tabs",
+        "modern-ui-connected-editor-tabs"
+      ],
+      "cat": "toasts",
+      "whole": true,
+      "one": true
+    },
+    "titlebar": {
+      "alts": [
+        "#workbench\\.parts\\.titlebar",
+        "div.part.titlebar:has([aria-label=\"File\"])"
+      ],
+      "tag": "div",
+      "id": "workbench.parts.titlebar",
+      "role": "none",
+      "cls": [
+        "part",
+        "titlebar"
+      ],
+      "pcls": [
+        "split-view-view"
+      ],
+      "cat": "titlebar",
+      "whole": true,
+      "one": true
+    },
+    "appIcon": {
+      "alts": [
+        "a.window-appicon",
+        "#workbench\\.parts\\.titlebar a.window-appicon"
+      ],
+      "tag": "a",
+      "cls": [
+        "window-appicon"
+      ],
+      "pcls": [
+        "titlebar-left"
+      ],
+      "cat": "appIcon",
+      "whole": true,
+      "one": true
+    },
+    "menubar": {
+      "alts": [
+        "div.menubar",
+        "#workbench\\.parts\\.titlebar div.menubar",
+        "div.menubar:has([aria-label=\"File\"])"
+      ],
+      "tag": "div",
+      "role": "menubar",
+      "cls": [
+        "menubar"
+      ],
+      "pcls": [
+        "titlebar-left"
+      ],
+      "cat": "menubar",
+      "whole": true,
+      "one": true
+    },
+    "commandCenter": {
+      "alts": [
+        "div.command-center",
+        "#workbench\\.parts\\.titlebar div.command-center",
+        "div.command-center:has([aria-label=\"Go Back (Alt+LeftArrow)\"])"
+      ],
+      "tag": "div",
+      "cls": [
+        "command-center"
+      ],
+      "pcls": [
+        "window-title"
+      ],
+      "cat": "commandCenter",
+      "whole": true,
+      "one": true
+    },
+    "layoutControls": {
+      "alts": [
+        "div.action-toolbar-container",
+        "#workbench\\.parts\\.titlebar div.action-toolbar-container",
+        "div.action-toolbar-container:has([aria-label=\"Title actions\"])"
+      ],
+      "tag": "div",
+      "cls": [
+        "action-toolbar-container"
+      ],
+      "pcls": [
+        "titlebar-right"
+      ],
+      "cat": "layoutControls",
+      "whole": true,
+      "one": true
+    },
+    "activitybar": {
+      "alts": [
+        "#workbench\\.parts\\.activitybar",
+        "div.part.activitybar:has([aria-label=\"Active View Switcher\"])"
+      ],
+      "tag": "div",
+      "id": "workbench.parts.activitybar",
+      "role": "none",
+      "cls": [
+        "part",
+        "activitybar",
+        "left"
+      ],
+      "pcls": [
+        "split-view-view"
+      ],
+      "cat": "activitybar",
+      "whole": true,
+      "one": true
+    },
+    "activityIcons": {
+      "tag": "a",
+      "aria": "Explorer (Ctrl+Shift+E)",
+      "cls": [
+        "action-label",
+        "codicon",
+        "codicon-explorer-view-icon"
+      ],
+      "pcls": [
+        "action-item",
+        "icon"
+      ],
+      "cat": "activityIcons",
+      "whole": true
+    },
+    "sidebar": {
+      "alts": [
+        "#workbench\\.parts\\.sidebar",
+        "div.part.sidebar:has([aria-label=\"Explorer actions\"])"
+      ],
+      "tag": "div",
+      "id": "workbench.parts.sidebar",
+      "role": "none",
+      "cls": [
+        "part",
+        "sidebar",
+        "left",
+        "pane-composite-part",
+        "floating-part-outer-top",
+        "floating-part-outer-bottom"
+      ],
+      "pcls": [
+        "split-view-view"
+      ],
+      "cat": "sidebar",
+      "whole": true,
+      "one": true
+    },
+    "sidebarTitle": {
+      "alts": [
+        "#workbench\\.parts\\.sidebar div.composite.title",
+        "div.composite.title:has([aria-label=\"Explorer actions\"])"
+      ],
+      "tag": "div",
+      "text": "Explorer",
+      "cls": [
+        "composite",
+        "title"
+      ],
+      "pcls": [
+        "part",
+        "sidebar",
+        "left",
+        "pane-composite-part"
+      ],
+      "cat": "sidebarTitle",
+      "whole": true,
+      "one": true
+    },
+    "paneHeader": {
+      "tag": "div",
+      "aria": "Explorer Section: workspace",
+      "role": "button",
+      "cls": [
+        "pane-header"
+      ],
+      "pcls": [
+        "pane",
+        "vertical",
+        "preserve-workspace-name-case"
+      ],
+      "cat": "paneHeader",
+      "whole": true
+    },
+    "tree": {
+      "alts": [
+        "div.monaco-list.list_id_3.mouse-support",
+        "div.monaco-list.list_id_3[aria-label=\"Files Explorer\"]",
+        "div[aria-label=\"Files Explorer\"]",
+        "[role=\"tree\"][aria-label=\"Files Explorer\"]"
+      ],
+      "tag": "div",
+      "aria": "Files Explorer",
+      "role": "tree",
+      "cls": [
+        "monaco-list",
+        "list_id_3",
+        "mouse-support",
+        "element-focused",
+        "selection-single"
+      ],
+      "pcls": [
+        "explorer-folders-view",
+        "file-icon-themable-tree",
+        "show-file-icons",
+        "align-icons-and-twisties"
+      ],
+      "cat": "tree",
+      "whole": true,
+      "one": true
+    },
+    "tabs": {
+      "alts": [
+        "div.tabs-container",
+        "div.tabs-container:has([aria-label=\"sample.js, preview\"])"
+      ],
+      "tag": "div",
+      "role": "tablist",
+      "text": "sample.js",
+      "cls": [
+        "tabs-container"
+      ],
+      "pcls": [
+        "monaco-scrollable-element"
+      ],
+      "cat": "tabs",
+      "whole": true,
+      "one": true
+    },
+    "tab": {
+      "alts": [
+        "div.tab.tab-actions-right.sizing-fit",
+        "div.tab.tab-actions-right[aria-label=\"sample.js, preview\"]",
+        "[role=\"tab\"][aria-label=\"sample.js, preview\"]"
+      ],
+      "tag": "div",
+      "aria": "sample.js, preview",
+      "role": "tab",
+      "cls": [
+        "tab",
+        "tab-actions-right",
+        "sizing-fit",
+        "tab-border-bottom",
+        "tab-border-top",
+        "connected-tab-left-edge"
+      ],
+      "pcls": [
+        "tabs-container"
+      ],
+      "cat": "tab",
+      "whole": true,
+      "one": true
+    },
+    "editorActions": {
+      "alts": [
+        "div.editor-actions",
+        "div.editor-actions:has([aria-label=\"Editor actions\"])"
+      ],
+      "tag": "div",
+      "cls": [
+        "editor-actions"
+      ],
+      "pcls": [
+        "tabs-and-actions-container",
+        "tabs-border-bottom"
+      ],
+      "cat": "editorActions",
+      "whole": true,
+      "one": true
+    },
+    "breadcrumbs": {
+      "alts": [
+        "div.breadcrumbs-control.with-editor-type.backslash-path"
+      ],
+      "tag": "div",
+      "cls": [
+        "breadcrumbs-control",
+        "with-editor-type",
+        "backslash-path",
+        "relative-path"
+      ],
+      "pcls": [
+        "breadcrumbs-below-tabs"
+      ],
+      "cat": "breadcrumbs",
+      "whole": true,
+      "one": true
+    },
+    "watermark": {
+      "alts": [
+        "div.editor-group-watermark"
+      ],
+      "tag": "div",
+      "cls": [
+        "editor-group-watermark"
+      ],
+      "pcls": [
+        "editor-group-watermark-wrapper"
+      ],
+      "cat": "watermark",
+      "whole": true,
+      "one": true
+    },
+    "minimap": {
+      "tag": "div",
+      "role": "presentation",
+      "cls": [
+        "minimap",
+        "slider-mouseover"
+      ],
+      "pcls": [
+        "overflow-guard"
+      ],
+      "cat": "minimap",
+      "whole": true
+    },
+    "stickyScroll": {
+      "alts": [
+        "div.sticky-widget"
+      ],
+      "tag": "div",
+      "cls": [
+        "sticky-widget"
+      ],
+      "pcls": [
+        "overlayWidgets"
+      ],
+      "cat": "stickyScroll",
+      "whole": true,
+      "one": true
+    },
+    "lineNumbers": {
+      "tag": "div",
+      "text": "1",
+      "cls": [
+        "line-numbers",
+        "active-line-number"
+      ],
+      "cat": "lineNumbers",
+      "whole": true
+    },
+    "gutter": {
+      "tag": "div",
+      "role": "presentation",
+      "cls": [
+        "margin"
+      ],
+      "pcls": [
+        "overflow-guard"
+      ],
+      "cat": "gutter",
+      "whole": true
+    },
+    "code": {
+      "tag": "div",
+      "role": "presentation",
+      "cls": [
+        "view-lines",
+        "monaco-mouse-cursor-text"
+      ],
+      "pcls": [
+        "lines-content",
+        "monaco-editor-background"
+      ],
+      "cat": "code",
+      "whole": true
+    },
+    "scrollbar": {
+      "tag": "div",
+      "role": "presentation",
+      "cls": [
+        "scrollbar",
+        "horizontal"
+      ],
+      "pcls": [
+        "monaco-scrollable-element",
+        "editor-scrollable",
+        "vs-dark"
+      ],
+      "cat": "scrollbar",
+      "whole": true
+    },
+    "panel": {
+      "alts": [
+        "#workbench\\.parts\\.panel",
+        "div.part.panel:has([aria-label=\"Active View Switcher\"])"
+      ],
+      "tag": "div",
+      "id": "workbench.parts.panel",
+      "role": "none",
+      "text": "Drag a view here to display.",
+      "cls": [
+        "part",
+        "panel",
+        "basepanel",
+        "bottom",
+        "pane-composite-part"
+      ],
+      "pcls": [
+        "split-view-view"
+      ],
+      "cat": "panel",
+      "whole": true,
+      "one": true
+    },
+    "panelTitle": {
+      "alts": [
+        "#workbench\\.parts\\.panel div.composite.title"
+      ],
+      "tag": "div",
+      "cls": [
+        "composite",
+        "title"
+      ],
+      "pcls": [
+        "part",
+        "panel",
+        "basepanel",
+        "bottom"
+      ],
+      "cat": "panelTitle",
+      "whole": true,
+      "one": true
+    },
+    "statusbar": {
+      "alts": [
+        "#workbench\\.parts\\.statusbar",
+        "footer.part.statusbar:has([aria-label=\"remote\"])"
+      ],
+      "tag": "footer",
+      "id": "workbench.parts.statusbar",
+      "role": "status",
+      "cls": [
+        "part",
+        "statusbar",
+        "status-border-top"
+      ],
+      "pcls": [
+        "split-view-view"
+      ],
+      "cat": "statusbar",
+      "whole": true,
+      "one": true
+    },
+    "statusItem": {
+      "tag": "div",
+      "id": "status.host",
+      "aria": "remote",
+      "cls": [
+        "statusbar-item",
+        "left",
+        "first-visible-item"
+      ],
+      "pcls": [
+        "left-items",
+        "items-container"
+      ],
+      "cat": "statusItem",
+      "whole": true
+    }
+  }
+}

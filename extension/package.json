@@ -1,0 +1,593 @@
+{
+  "name": "moon-core",
+  "displayName": "Moon Core",
+  "description": "Переделай интерфейс VS Code под себя: конструктор (убрать, увеличить, перекрасить любой элемент), живые CSS/JS-сниппеты, пипетка, проверка селекторов. Ноль зависимостей.",
+  "version": "0.1.0",
+  "publisher": "moonlivedt",
+  "author": "moonlivedt (MoonLightDeath)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/moonlivedt-oss/moon-core.git"
+  },
+  "bugs": {
+    "url": "https://github.com/moonlivedt-oss/moon-core/issues"
+  },
+  "homepage": "https://github.com/moonlivedt-oss/moon-core#readme",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Themes",
+    "Other"
+  ],
+  "keywords": [
+    "custom css",
+    "custom js",
+    "ui",
+    "кастомизация",
+    "интерфейс"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    }
+  },
+  "extensionKind": [
+    "ui"
+  ],
+  "main": "./extension.js",
+  "scripts": {
+    "vscode:uninstall": "node ./uninstall.js"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "moonCore",
+          "title": "Moon Core",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "moonCore": [
+        {
+          "id": "moonCore.snippets",
+          "name": "Сниппеты"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "moonCore.snippets",
+        "contents": "Moon Core меняет интерфейс VS Code под тебя.\n[Открыть конструктор](command:moonCore.design)\nКликни по любому элементу окна — убрать, увеличить, перекрасить. Всё отменяется во вкладке «Правки».\n[Профили вида](command:moonCore.profile)\nГотовые наборы: Минимал, Только код, Крупный.\nЧто-то не работает? [Доктор](command:moonCore.doctor) покажет, что не так, и починит.\n\nДля разработчиков — свои стили и скрипты (появятся здесь списком):\n[Новый CSS-сниппет](command:moonCore.newCss)\n[Новый JS-сниппет](command:moonCore.newJs)"
+      }
+    ],
+    "commands": [
+      {
+        "command": "moonCore.design",
+        "title": "Конструктор интерфейса",
+        "category": "Moon Core",
+        "icon": "$(layout)"
+      },
+      {
+        "command": "moonCore.designReset",
+        "title": "Вернуть исходный вид (снять изменения конструктора)",
+        "category": "Moon Core",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "moonCore.profile",
+        "title": "Профили вида",
+        "category": "Moon Core",
+        "icon": "$(symbol-color)"
+      },
+      {
+        "command": "moonCore.menu",
+        "title": "Меню",
+        "category": "Moon Core"
+      },
+      {
+        "command": "moonCore.inject",
+        "title": "Внедрить в VS Code",
+        "category": "Moon Core",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "moonCore.remove",
+        "title": "Убрать из VS Code",
+        "category": "Moon Core"
+      },
+      {
+        "command": "moonCore.status",
+        "title": "Диагностика в журнал",
+        "category": "Moon Core",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "moonCore.showLog",
+        "title": "Показать журнал",
+        "category": "Moon Core"
+      },
+      {
+        "command": "moonCore.pick",
+        "title": "Пипетка (навести на элемент и скрыть его)",
+        "category": "Moon Core",
+        "icon": "$(inspect)"
+      },
+      {
+        "command": "moonCore.modules",
+        "title": "Модули",
+        "category": "Moon Core",
+        "icon": "$(extensions)"
+      },
+      {
+        "command": "moonCore.exportAll",
+        "title": "Сохранить вид в файл",
+        "category": "Moon Core",
+        "icon": "$(export)"
+      },
+      {
+        "command": "moonCore.importAll",
+        "title": "Загрузить вид из файла",
+        "category": "Moon Core",
+        "icon": "$(desktop-download)"
+      },
+      {
+        "command": "moonCore.syncPull",
+        "title": "Загрузить вид из синхронизации",
+        "category": "Moon Core",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "moonCore.checkSelectors",
+        "title": "Проверить элементы (что сломалось после обновления VS Code)",
+        "category": "Moon Core",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "moonCore.reloadSnippets",
+        "title": "Перезапустить сниппеты",
+        "category": "Moon Core",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "moonCore.newCss",
+        "title": "Новый CSS-сниппет",
+        "category": "Moon Core",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "moonCore.newJs",
+        "title": "Новый JS-сниппет",
+        "category": "Moon Core",
+        "icon": "$(symbol-event)"
+      },
+      {
+        "command": "moonCore.openFolder",
+        "title": "Открыть папку сниппетов",
+        "category": "Moon Core",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "moonCore.openSnippet",
+        "title": "Открыть",
+        "category": "Moon Core"
+      },
+      {
+        "command": "moonCore.toggleSnippet",
+        "title": "Включить / выключить",
+        "category": "Moon Core"
+      },
+      {
+        "command": "moonCore.deleteSnippet",
+        "title": "Удалить",
+        "category": "Moon Core",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "moonCore.doctor",
+        "title": "Доктор (состояние и починка)",
+        "category": "Moon Core",
+        "icon": "$(heart)"
+      },
+      {
+        "command": "moonCore.moduleDev",
+        "title": "Режим разработки модуля",
+        "category": "Moon Core",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "moonCore.newModule",
+        "title": "Создать модуль",
+        "category": "Moon Core",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "moonCore.saveProjectProfile",
+        "title": "Сохранить вид в проект (.vscode/mooncore.json)",
+        "category": "Moon Core",
+        "icon": "$(root-folder)"
+      },
+      {
+        "command": "moonCore.deep",
+        "title": "Глубокая интеграция (сервисы окна, главный процесс)",
+        "category": "Moon Core",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "moonCore.windowLook",
+        "title": "Вид окна (прозрачность, акрил, поверх всех)",
+        "category": "Moon Core",
+        "icon": "$(window)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "moonCore.design",
+          "when": "view == moonCore.snippets",
+          "group": "navigation@1"
+        },
+        {
+          "command": "moonCore.pick",
+          "when": "view == moonCore.snippets",
+          "group": "navigation@2"
+        },
+        {
+          "command": "moonCore.profile",
+          "when": "view == moonCore.snippets",
+          "group": "navigation@3"
+        },
+        {
+          "command": "moonCore.doctor",
+          "when": "view == moonCore.snippets",
+          "group": "navigation@4"
+        },
+        {
+          "command": "moonCore.designReset",
+          "when": "view == moonCore.snippets",
+          "group": "1_view@1"
+        },
+        {
+          "command": "moonCore.exportAll",
+          "when": "view == moonCore.snippets",
+          "group": "1_view@2"
+        },
+        {
+          "command": "moonCore.importAll",
+          "when": "view == moonCore.snippets",
+          "group": "1_view@3"
+        },
+        {
+          "command": "moonCore.syncPull",
+          "when": "view == moonCore.snippets",
+          "group": "1_view@4"
+        },
+        {
+          "command": "moonCore.saveProjectProfile",
+          "when": "view == moonCore.snippets",
+          "group": "1_view@5"
+        },
+        {
+          "command": "moonCore.checkSelectors",
+          "when": "view == moonCore.snippets",
+          "group": "2_fix@1"
+        },
+        {
+          "command": "moonCore.inject",
+          "when": "view == moonCore.snippets",
+          "group": "2_fix@2"
+        },
+        {
+          "command": "moonCore.remove",
+          "when": "view == moonCore.snippets",
+          "group": "2_fix@3"
+        },
+        {
+          "command": "moonCore.newCss",
+          "when": "view == moonCore.snippets",
+          "group": "3_dev@1"
+        },
+        {
+          "command": "moonCore.newJs",
+          "when": "view == moonCore.snippets",
+          "group": "3_dev@2"
+        },
+        {
+          "command": "moonCore.openFolder",
+          "when": "view == moonCore.snippets",
+          "group": "3_dev@3"
+        },
+        {
+          "command": "moonCore.reloadSnippets",
+          "when": "view == moonCore.snippets",
+          "group": "3_dev@4"
+        },
+        {
+          "command": "moonCore.modules",
+          "when": "view == moonCore.snippets",
+          "group": "3_dev@5"
+        },
+        {
+          "command": "moonCore.newModule",
+          "when": "view == moonCore.snippets",
+          "group": "3_dev@6"
+        },
+        {
+          "command": "moonCore.moduleDev",
+          "when": "view == moonCore.snippets",
+          "group": "3_dev@7"
+        },
+        {
+          "command": "moonCore.status",
+          "when": "view == moonCore.snippets",
+          "group": "3_dev@8"
+        },
+        {
+          "command": "moonCore.windowLook",
+          "when": "view == moonCore.snippets",
+          "group": "1_view@6"
+        },
+        {
+          "command": "moonCore.deep",
+          "when": "view == moonCore.snippets",
+          "group": "2_fix@4"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "moonCore.deleteSnippet",
+          "when": "view == moonCore.snippets && viewItem == snippet",
+          "group": "inline"
+        },
+        {
+          "command": "moonCore.toggleSnippet",
+          "when": "view == moonCore.snippets && viewItem == snippet",
+          "group": "1_main@1"
+        },
+        {
+          "command": "moonCore.deleteSnippet",
+          "when": "view == moonCore.snippets && viewItem == snippet",
+          "group": "1_main@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "moonCore.openSnippet",
+          "when": "false"
+        },
+        {
+          "command": "moonCore.toggleSnippet",
+          "when": "false"
+        },
+        {
+          "command": "moonCore.deleteSnippet",
+          "when": "false"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "moonCore.pick",
+        "key": "ctrl+alt+shift+c",
+        "mac": "cmd+alt+shift+c"
+      }
+    ],
+    "configuration": {
+      "title": "Moon Core",
+      "properties": {
+        "moonCore.livePreview": {
+          "type": "boolean",
+          "default": true,
+          "description": "Показывать несохранённые правки CSS-сниппетов сразу, на каждый символ."
+        },
+        "moonCore.allowCommands": {
+          "type": "boolean",
+          "default": true,
+          "description": "Разрешить JS-сниппетам вызывать команды VS Code (mc.command). Каждую новую команду Moon Core сначала спросит.",
+          "scope": "machine"
+        },
+        "moonCore.allowedCommands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "machine",
+          "description": "Команды VS Code, которые JS-сниппеты могут вызывать без вопроса. Остальные — после согласия («Разрешить всегда» запоминается)."
+        },
+        "moonCore.modules": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "machine",
+          "markdownDescription": "Папки модулей Moon Core (в каждой лежит `mooncore-module.json`). Модули из расширений находятся сами, через `moonCore.modules` в их package.json. Каждый новый модуль встраивается только после твоего согласия."
+        },
+        "moonCore.autoProfiles": {
+          "type": "array",
+          "default": [],
+          "scope": "application",
+          "markdownDescription": "Профиль вида по контексту: первое подходящее правило включает свой профиль. Условия внутри правила — все сразу, внутри списка — любое; в папках и ветках работает `*`. Пример: `[{ \"profile\": \"Только код\", \"languages\": [\"markdown\"] }, { \"profile\": \"Минимал\", \"folders\": [\"work-*\"] }, { \"profile\": \"Ночь\", \"time\": \"22:00-07:00\" }, { \"profile\": \"Светлый\", \"themes\": [\"light\"] }]`. Профиль общий для всех окон, решает окно в фокусе; несохранённые правки конструктора не затираются. Файл `.vscode/mooncore.json` в проекте (после согласия) важнее этих правил.",
+          "items": {
+            "type": "object",
+            "required": [
+              "profile"
+            ],
+            "properties": {
+              "profile": {
+                "type": "string",
+                "description": "Имя профиля (встроенного или своего)"
+              },
+              "languages": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Язык активного файла (languageId): markdown, typescript..."
+              },
+              "folders": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Имя папки проекта, можно со *"
+              },
+              "branches": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Git-ветка, можно со *"
+              },
+              "themes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "dark",
+                    "light",
+                    "highContrast",
+                    "highContrastLight"
+                  ]
+                },
+                "description": "Вид темы VS Code: dark, light, highContrast, highContrastLight"
+              },
+              "time": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^([01]?[0-9]|2[0-3]):[0-5][0-9]\\s*-\\s*([01]?[0-9]|2[0-3]):[0-5][0-9]$"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                ],
+                "description": "Время суток «ЧЧ:ММ-ЧЧ:ММ» (или список), можно через полночь: \"22:00-07:00\""
+              }
+            }
+          }
+        },
+        "moonCore.autoProfileDefault": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "Профиль, когда ни одно правило moonCore.autoProfiles не подошло. Пусто — ничего не менять."
+        },
+        "moonCore.sync": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "markdownDescription": "Синхронизировать вид Moon Core (правки конструктора, профили, сниппеты) через Settings Sync: копия лежит в `moonCore.syncData`. На машине, где Moon Core ещё пуст, вид восстановится сам; иначе Moon Core спросит."
+        },
+        "moonCore.syncData": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "default": null,
+          "scope": "application",
+          "markdownDescription": "Служебная: пакет вида Moon Core для Settings Sync. Заполняется сам, когда включена `moonCore.sync`. Править руками не нужно."
+        },
+        "moonCore.autoUpdateInjection": {
+          "type": "boolean",
+          "default": true,
+          "description": "Обновлять рантайм в оболочке VS Code, когда вышла новая версия расширения.",
+          "scope": "machine"
+        },
+        "moonCore.fixChecksum": {
+          "type": "boolean",
+          "default": true,
+          "description": "Пересчитывать контрольную сумму оболочки в product.json, чтобы VS Code не писал «установка повреждена». Исходное значение хранится в бэкапе и возвращается при снятии.",
+          "scope": "machine"
+        },
+        "moonCore.autoReinject": {
+          "type": "boolean",
+          "default": false,
+          "description": "После обновления VS Code встраивать Moon Core заново без вопроса (останется только перезагрузить окно).",
+          "scope": "machine"
+        },
+        "moonCore.moduleFiles": {
+          "type": "boolean",
+          "default": true,
+          "description": "Класть рантаймы модулей отдельными файлами рядом с оболочкой (оболочка легче, скрипт кэшируется). Выключено — модули вписываются прямо в workbench.html, как раньше.",
+          "scope": "machine"
+        },
+        "moonCore.injectSessions": {
+          "type": "boolean",
+          "default": false,
+          "description": "Встраивать Moon Core и в окно агентских сессий (sessions.html, VS Code 1.121+).",
+          "scope": "machine"
+        },
+        "moonCore.moduleIntegrity": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine",
+          "description": "Проверять целостность файлов модулей (атрибут integrity): подменённый файл не загрузится. Если эта версия VS Code проверку не поддерживает, Moon Core выключит её сам."
+        },
+        "moonCore.lazyUi": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine",
+          "description": "Грузить конструктор и пипетку при первом открытии, а не при каждом старте окна: в оболочку встраивается только ядро (вдвое меньше), интерфейс лежит файлом в хранилище расширения. Если эта версия VS Code не даёт так загрузить интерфейс, Moon Core встроит его целиком сам."
+        },
+        "moonCore.deepHooks": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine",
+          "markdownDescription": "Сервисы окна: одна строка в бандле воркбенча VS Code открывает Moon Core и модулям настоящие сервисы окна (`mc.service(\"statusbarService\")`). Бандл сохраняется в бэкап, хэш в product.json пересчитывается, снятие возвращает исходный файл. Включать командой `Moon Core: Глубокая интеграция`."
+        },
+        "moonCore.mainProcess": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine",
+          "markdownDescription": "Главный процесс: импорт в `out/main.js` для настроек окна `moonCore.window` (прозрачность, поверх всех, акрил/слюда Windows 11, vibrancy macOS). Нужен полный перезапуск VS Code."
+        },
+        "moonCore.window": {
+          "type": "object",
+          "default": {
+            "opacity": 1,
+            "alwaysOnTop": false,
+            "material": "none"
+          },
+          "scope": "machine",
+          "markdownDescription": "Вид окна VS Code (работает при `moonCore.mainProcess`). Меняется сразу, без перезапуска.",
+          "properties": {
+            "opacity": {
+              "type": "number",
+              "minimum": 0.3,
+              "maximum": 1,
+              "default": 1,
+              "description": "Непрозрачность окна: 1 — обычное"
+            },
+            "alwaysOnTop": {
+              "type": "boolean",
+              "default": false,
+              "description": "Поверх всех окон"
+            },
+            "material": {
+              "type": "string",
+              "enum": [
+                "none",
+                "acrylic",
+                "mica",
+                "tabbed"
+              ],
+              "default": "none",
+              "description": "Материал фона Windows 11 (виден там, где интерфейс прозрачный)"
+            }
+          }
+        }
+      }
+    }
+  }
+}

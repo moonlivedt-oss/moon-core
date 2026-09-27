@@ -1,0 +1,25 @@
+# Единый перевод строк (LF) для текста — иначе на Windows (core.autocrlf=true) файлы
+# на диске в CRLF, а в гите в LF, и сравнения путаются. Смоук-тест 11-structure требует LF.
+* text=auto eol=lf
+
+# Исходники, собранный рантайм и текст — всегда LF (scripts/build-runtime.js склеивает через "\n").
+*.js text eol=lf
+*.ts text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.svg text eol=lf
+*.yml text eol=lf
+*.html text eol=lf
+
+# Батники — CRLF: cmd с LF-строками промахивается мимо меток.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Бинарники — не трогать переводы строк, не показывать в diff как текст.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.vsix binary

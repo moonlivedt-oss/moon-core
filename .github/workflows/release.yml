@@ -1,0 +1,53 @@
+name: Release
+
+# Релиз по тегу вида v0.2.0: проверить, собрать пакет и приложить его к релизу на GitHub.
+# В маркетплейс не публикуем: Moon Core правит файлы VS Code и раздаётся своим .vsix.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:   # можно запустить руками из вкладки Actions
+
+permissions:
+  contents: write      # нужно, чтобы приложить .vsix к релизу
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Релиз со сломанной сборкой хуже отсутствия релиза.
+      - name: Тесты
+        run: npm test
+
+      - name: Сборка .vsix
+        run: npm run package
+
+      - name: Версия пакета совпадает с тегом
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(node -p "require('./extension/package.json').version")
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::Тег $GITHUB_REF_NAME не совпадает с версией расширения $PKG"
+            exit 1
+          fi
+
+      - name: Приложить пакет к релизу
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.vsix
+          generate_release_notes: true
+
+      - name: Сохранить пакет как артефакт сборки
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: dist/*.vsix
+          retention-days: 30

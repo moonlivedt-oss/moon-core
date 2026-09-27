@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Moon Core fixture</title>
+<style>
+  :root { --vscode-focusBorder: #89b4fa; --vscode-font-family: Segoe UI, sans-serif; --vscode-editor-font-family: Consolas, monospace; }
+  body { margin: 0; background: #1e1e2e; color: #cdd6f4; font: 13px var(--vscode-font-family); overflow: hidden; }
+  /* Как в VS Code: цвета темы — переменными на .monaco-workbench, части берут их через var(). */
+  .monaco-workbench { --vscode-statusBar-background: #89b4fa; --vscode-statusBar-foreground: #11111b; --vscode-sideBar-background: #1e1e2e;
+    --vscode-activityBar-background: #181825; --vscode-editor-background: #11111b; --vscode-editorCursor-foreground: #f5c2e7;
+    --vscode-tab-activeBackground: #11111b; --vscode-tab-inactiveBackground: #181825; }
+  .monaco-workbench { display: grid; grid-template-columns: 48px 240px 1fr; grid-template-rows: 35px 1fr 160px 22px; height: 100vh; }
+  .part.titlebar { grid-column: 1 / 4; display: flex; align-items: center; background: #181825; border-bottom: 1px solid #313244; }
+  .titlebar-left, .titlebar-center, .titlebar-right { display: flex; align-items: center; gap: 6px; padding: 0 8px; }
+  .titlebar-center { flex: 1; justify-content: center; }
+  .window-appicon { width: 16px; height: 16px; border-radius: 4px; background: #89b4fa; }
+  .menubar { display: flex; gap: 10px; }
+  .command-center { width: 380px; text-align: center; padding: 3px; border: 1px solid #45475a; border-radius: 6px; color: #a6adc8; }
+  .action-toolbar-container { display: flex; gap: 6px; }
+  .action-toolbar-container span { width: 16px; height: 16px; background: #45475a; border-radius: 3px; display: inline-block; }
+  .part.activitybar { grid-row: 2 / 4; background: var(--vscode-activityBar-background); }
+  .part.activitybar .monaco-action-bar { display: flex; flex-direction: column; align-items: center; gap: 14px; padding-top: 10px; }
+  .part.activitybar .action-label { width: 24px; height: 24px; border-radius: 5px; background: #585b70; display: block; }
+  .part.sidebar { grid-row: 2 / 4; background: var(--vscode-sideBar-background); border-right: 1px solid #313244; }
+  .part.sidebar > .composite.title { padding: 8px 12px; font-size: 11px; text-transform: uppercase; }
+  .pane-header { padding: 4px 12px; font-weight: 600; font-size: 11px; background: #181825; }
+  .monaco-list-row { padding: 2px 20px; }
+  .part.editor { background: #11111b; display: flex; flex-direction: column; }
+  .editor-group-container > .title { display: flex; background: #181825; }
+  .tabs-container { display: flex; flex: 1; }
+  .tab { padding: 8px 14px; border-right: 1px solid #313244; }
+  .tab { background: var(--vscode-tab-inactiveBackground); }
+  .tab.active { background: var(--vscode-tab-activeBackground); }
+  .editor-actions { display: flex; gap: 6px; padding: 8px; }
+  .editor-actions span { width: 14px; height: 14px; background: #45475a; border-radius: 3px; display: inline-block; }
+  .breadcrumbs-control { padding: 3px 14px; font-size: 12px; color: #a6adc8; }
+  .monaco-editor { position: relative; flex: 1; font-family: var(--vscode-editor-font-family); }
+  .monaco-editor .margin { position: absolute; left: 0; top: 0; bottom: 0; width: 48px; color: #6c7086; text-align: right; }
+  .monaco-editor .view-lines { position: absolute; left: 60px; top: 0; right: 110px; }
+  .monaco-editor .minimap { position: absolute; right: 0; top: 0; bottom: 0; width: 100px; background: #181825; }
+  .part.panel { grid-column: 3; grid-row: 3; background: #181825; border-top: 1px solid #313244; }
+  .part.panel > .title { padding: 6px 12px; font-size: 11px; text-transform: uppercase; }
+  .terminal-wrapper { padding: 6px 12px; font-family: var(--vscode-editor-font-family); }
+  .part.statusbar { grid-column: 1 / 4; grid-row: 4; background: var(--vscode-statusBar-background); color: var(--vscode-statusBar-foreground); display: flex; justify-content: space-between; }
+  .statusbar-item { padding: 0 8px; line-height: 22px; }
+  .left-items, .right-items { display: flex; }
+  .right-items { flex-direction: row-reverse; }   /* как в VS Code: правые пункты идут справа налево */
+</style>
+<script src="boot.js"></script>
+<script src="../extension/runtime/mooncore-runtime.js"></script>
+<script src="fixture-module.js"></script>
+<script src="modules.js"></script>
+</head>
+<body>
+<div class="monaco-workbench">
+  <div class="part titlebar" id="workbench.parts.titlebar">
+    <div class="titlebar-left"><div class="window-appicon"></div><div class="menubar"><span>File</span><span>Edit</span><span>View</span></div></div>
+    <div class="titlebar-center"><div class="command-center">moon-core</div></div>
+    <div class="titlebar-right"><div class="action-toolbar-container"><span></span><span></span><span></span></div></div>
+  </div>
+  <div class="part activitybar" id="workbench.parts.activitybar">
+    <div class="content"><div class="monaco-action-bar">
+      <a class="action-label codicon" aria-label="Explorer"></a><a class="action-label codicon" aria-label="Search"></a><a class="action-label codicon" aria-label="Source Control"></a>
+    </div></div>
+  </div>
+  <div class="part sidebar" id="workbench.parts.sidebar">
+    <div class="composite title"><span class="title-label">Explorer</span></div>
+    <div class="pane-header">MOON-CORE</div>
+    <div class="monaco-list" id="list_id_3">
+      <div class="monaco-list-row focused selected" aria-label="extension.js"><span class="label-name">extension.js</span></div>
+      <div class="monaco-list-row" aria-label="package.json"><span class="label-name">package.json</span></div>
+    </div>
+  </div>
+  <div class="part editor" id="workbench.parts.editor">
+    <div class="editor-group-container">
+      <div class="title">
+        <div class="tabs-container">
+          <div class="tab active" aria-label="extension.js"><span class="label-name">extension.js</span></div>
+          <div class="tab" aria-label="package.json"><span class="label-name">package.json</span></div>
+        </div>
+        <div class="editor-actions"><span></span><span></span></div>
+      </div>
+      <div class="breadcrumbs-control">moon-core &rsaquo; extension &rsaquo; extension.js</div>
+    </div>
+    <div class="monaco-editor">
+      <div class="margin"><div class="line-numbers">1<br>2<br>3</div></div>
+      <div class="view-lines">"use strict";<br>const vscode = require("vscode");<br></div>
+      <div class="minimap"></div>
+    </div>
+  </div>
+  <div class="part panel" id="workbench.parts.panel">
+    <div class="title">Terminal</div>
+    <div class="terminal-wrapper">PS C:\project&gt;</div>
+  </div>
+  <div class="part statusbar" id="workbench.parts.statusbar">
+    <div class="left-items"><div class="statusbar-item" id="status.scm">main</div><div class="statusbar-item" id="status.problems">0 ошибок</div><div class="statusbar-item" id="status.sync" aria-label="Синхронизация">sync</div></div>
+    <div class="right-items"><div class="statusbar-item" id="status.editor.selection">Ln 1, Col 1</div><div class="statusbar-item" id="status.editor.encoding">UTF-8</div><div class="statusbar-item" id="status.editor.eol">CRLF</div></div>
+  </div>
+</div>
+</body>
+</html>

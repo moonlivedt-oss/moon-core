@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # npm test: собранный рантайм совпадает с частями runtime/src, смоук (без VS Code) и
+  # поведенческие тесты рантайма окна в заглушке DOM. Зависимостей нет — npm ci не нужен.
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        node: [22]
+        include:
+          - os: windows-latest
+            node: 24
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Тесты (npm test)
+        run: npm test
+
+  # Упаковщик .vsix — свой ZIP-writer поверх zlib: пакет собирается, в dist/ — непустой .vsix.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Собрать пакет
+        run: npm run package
+      - name: Проверить, что .vsix собран
+        run: |
+          shopt -s nullglob
+          files=(dist/*.vsix)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::.vsix не собран — упаковщик ничего не положил в dist/"
+            exit 1
+          fi
+          ls -l "${files[@]}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: dist/*.vsix
+          retention-days: 14
