@@ -12,6 +12,9 @@
 //      "version": "20.0.0",            // для диагностики (необязательно)
 //      "script":  "custom-bg.js",      // путь к рантайму ОТНОСИТЕЛЬНО корня модуля
 //      "assets":  "."                  // папка ресурсов относительно корня (необязательно)
+//      "trustedTypes": ["mlbg"]        // свои политики Trusted Types (необязательно, до 4): Moon Core
+//                                      // впишет их в CSP оболочки — без этого trustedTypes.createPolicy
+//                                      // в VS Code с CSP (require-trusted-types-for) упадёт
 //    }
 //  Источники:
 //    - расширение: package.json -> "moonCore": { "modules": [ <манифест>, ... ] }, корень = папка расширения;
@@ -26,6 +29,8 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { writeAtomic } = require("./storage");
+const TT = require("./trusted-types");
+const MF = require("./module-manifest");
 
 const MODULE_FILE = "mooncore-module.json";
 const ID_RE = /^[a-z][a-z0-9-]{1,31}$/;
@@ -72,6 +77,8 @@ function normalize(raw, root, source) {
     try { st = fs.statSync(script); } catch (e) { return { ok: false, error: id + ": скрипт недоступен" }; }
     if (!st.isFile()) return { ok: false, error: id + ": скрипт не файл" };
     if (st.size > LIMITS.MAX_SCRIPT) return { ok: false, error: id + ": скрипт больше " + (LIMITS.MAX_SCRIPT >> 20) + " МБ" };
+    const tt = TT.checkNames(raw.trustedTypes);
+    if (!tt.ok) return { ok: false, error: id + ": " + tt.error };
     let assets = fs.realpathSync(root);
     if (raw.assets != null) {
         assets = inside(root, String(raw.assets));
@@ -88,6 +95,10 @@ function normalize(raw, root, source) {
             root: fs.realpathSync(root),
             script: script,
             assets: assets,
+            trustedTypes: tt.names,
+            caps: MF.cleanCaps(raw.capabilities),
+            lazy: MF.cleanLazy(raw.lazy),
+            commands: MF.cleanCommands(raw.commands),
             source: clip(source, 200),
         },
     };
@@ -153,6 +164,9 @@ function bootInfo(modules, fileUrl, dataDir) {
         id: m.id, name: m.name, version: m.version,
         base: fileUrl(m.assets).replace(/\/?$/, "/"),
         dataUrl: dataDir ? fileUrl(dataFile(dataDir, m.id)) : "",
+        // Ленивый модуль: когда грузить (файл и integrity дописывает план внедрения).
+        lazy: m.lazy ? { delay: m.lazy.delay } : null,
+        commands: (m.commands || []).map((c) => c.id),
     }));
 }
 
@@ -178,7 +192,14 @@ class ModuleHub {
     }
 
     setModules(list) {
-        this.known = new Map(list.map((m) => [m.id, m]));
+        const next = new Map(list.map((m) => [m.id, m]));
+        const removed = Array.from(this.known.keys()).filter((id) => !next.has(id));
+        this.known = next;
+        // Выключенный модуль: его последние события не должны доставаться новым окнам, а то, что
+        // он создал в VS Code (элементы статусбара через шлюз), — оставаться висеть.
+        removed.forEach((id) => this.cache.delete(id));
+        if (removed.length && typeof this.onRemoved === "function") { try { this.onRemoved(removed); } catch (e) { this.log("модули: уборка", e); } }
+        return removed;
     }
 
     has(id) { return this.known.has(id); }
@@ -192,6 +213,9 @@ class ModuleHub {
         try { text = JSON.stringify(data === undefined ? null : data); } catch (e) { throw new Error("Moon Core: данные события не сериализуются"); }
         if (text.length > LIMITS.MAX_DATA) throw new Error("Moon Core: событие больше " + (LIMITS.MAX_DATA >> 10) + " КБ");
         const payload = { id: id, event: event, scope: scope, data: JSON.parse(text) };
+        // cache: false — разовое событие (клик, команда): новое окно не должно получить его при
+        // подключении, иначе после перезагрузки окна старый клик «нажался» бы ещё раз.
+        if (opts && opts.cache === false) { payload.once = true; this.broadcast("module", payload); return; }
         let c = this.cache.get(id);
         if (!c) { c = new Map(); this.cache.set(id, c); }
         c.delete(event);

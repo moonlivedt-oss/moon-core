@@ -18,8 +18,9 @@ const path = require("path");
 const W = require("../wb-patch");
 const { statKey, writeAtomic } = require("../fsx");
 const { storageDir, fileUrl } = require("../storage");
+const KEYS = require("../keys");
 
-const UI_INLINE_KEY = "mooncore.uiInlineFor";   // версия VS Code, где ленивая загрузка не сработала
+const UI_INLINE_KEY = KEYS.UI_INLINE_FOR;   // версия VS Code, где ленивая загрузка не сработала
 const UI_PREFIX = "mooncore-ui-";
 
 function rtFile(context, name) { return path.join(context.extensionPath, "runtime", name); }

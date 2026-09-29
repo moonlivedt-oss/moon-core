@@ -3,25 +3,25 @@
 //
 //  Класс собран из частей (методы подмешиваются в Host.prototype):
 //    host-snippets.js — сниппеты CSS/JS, одобрение JS, живой предпросмотр;
+//    host-gate.js     — команды VS Code из окна (согласие), журнал и время запуска окна;
 //    host-transfer.js — экспорт/импорт вида и Settings Sync;
 //    host-context.js  — профили по контексту и профиль проекта;
 //    host-check.js    — проверка селекторов и самолечение правок;
-//    host-ui.js       — кнопки, контекст окна, шлюз к API VS Code для модулей, кнопки расширений.
+//    host-ui.js       — кнопки, контекст окна, шлюз к API VS Code для модулей, кнопки расширений;
+//    host-vs.js       — события VS Code для модулей, код, подсветка, части окна, команды модулей.
 // ============================================================
 "use strict";
 
 const vscode = require("vscode");
 const fs = require("fs");
 const path = require("path");
-const P = require("./protocol");
 const S = require("./snippets");
 const { createBridge } = require("./bridge");
-const { log, showLog } = require("./log");
+const { log } = require("./log");
 const C = require("./catalog");
 const D = require("./design");
 const { DesignEngine } = require("./engine");
 const { ModuleHub } = require("./modules");
-const CMD = require("./commands");
 const { modulesDataDir, storageDir, ensureDir, bridgeFile, stateFile, snippetsDir, metaFile, designFile, profilesFile } = require("./storage");
 const { safeWatch, statKey } = require("./fsx");
 
@@ -56,10 +56,11 @@ class Host {
         this.bridge = createBridge({
             file: bridgeFile(context),
             dispatch: (m, b) => this.dispatch(m, b),
-            hello: () => [{ event: "state", data: this.state }, { event: "focus", data: this.focusInfo() }, { event: "ctx", data: this.ctxInfo() }].concat(this.modules.hello()),
+            hello: () => [{ event: "state", data: this.state }, { event: "focus", data: this.focusInfo() }, { event: "ctx", data: this.ctxInfo() }, { event: "moduleSet", data: this.moduleSetInfo() }].concat(this.modules.hello()),
             isFocused: () => !!(vscode.window.state && vscode.window.state.focused),
         });
         this.modules = new ModuleHub({ broadcast: (e, d) => this.bridge.broadcast(e, d), log: log, dataDir: modulesDataDir(context) });
+        this.modules.onRemoved = (ids) => { this.disposeNative(ids); this.disposeVs(ids); };
         this.bridge.ready.then(() => log("мост поднят на 127.0.0.1:" + this.bridge.port)).catch((e) => log("мост не поднялся", e));
         this.rebuild();
         this.watch();
@@ -150,99 +151,49 @@ class Host {
 
     // ---------------- запросы окна ----------------
 
-    async dispatch(method, body) {
-        if (method === "module") return this.modules.dispatch(body);
-        if (method === "moduleData") return this.modules.saveFromWindow(body);
-        if (method === "focus") return Object.assign({ ok: true }, this.focusInfo());
-        if (method === "log") return this.onWindowLog(body);
-        if (method === "timing") return this.onWindowTiming(body);
-        if (method === "pickCommand") return this.pickCommandForButton();
-        if (method === "native") return this.onNative(body);
-        if (method === "uiClick") return this.onUiClick(body);
-        if (method === "context") return Object.assign({ ok: true }, this.ctxInfo());
-        if (method === "uiFailed") return typeof this.onUiFailed === "function" ? this.onUiFailed(body) : { ok: false, error: "нет обработчика" };
-        if (method === "moduleCode") {
+    /**
+     * Запрос окна -> обработчик. Таблица (а не цепочка if): метод из протокола без обработчика
+     * виден сразу (тест сверяет её с P.METHODS), порядок проверок не важен.
+     */
+    rpcTable() {
+        if (this._rpc) return this._rpc;
+        this._rpc = {
+            module: (b) => this.modules.dispatch(b),
+            moduleData: (b) => this.modules.saveFromWindow(b),
+            focus: () => Object.assign({ ok: true }, this.focusInfo()),
+            log: (b) => this.onWindowLog(b),
+            timing: (b) => this.onWindowTiming(b),
+            pickCommand: () => this.pickCommandForButton(),
+            native: (b) => this.onNative(b),
+            uiClick: (b) => this.onUiClick(b),
+            vsSubscribe: (b) => this.vsSubscribe(b),
+            modCommands: (b) => this.modCommandsFromWindow(b),
+            context: () => Object.assign({ ok: true }, this.ctxInfo()),
+            uiFailed: (b) => typeof this.onUiFailed === "function" ? this.onUiFailed(b) : { ok: false, error: "нет обработчика" },
             // Код модуля отдаётся только в режиме разработки (его включает пользователь командой).
-            const id = String(body && body.id || "");
-            const code = typeof this.devModuleCode === "function" ? this.devModuleCode(id) : null;
-            return typeof code === "string" ? { ok: true, code: code } : { ok: false, error: "модуль " + id.slice(0, 40) + " не в режиме разработки" };
-        }
-        if (method === "command") return this.onCommand(body);
-        if (method === "picked") return this.onPicked(body);
-        if (method === "design") return this.onDesign(body);
-        if (method === "report") {
-            const res = this.pending.get(String(body.reqId || ""));
-            if (res) res(body);
-            return { ok: true };
-        }
-        return { ok: false, error: "unknown method" };
+            // Ленивый модуль: файл рядом с оболочкой пропал или изменился (модуль обновило другое
+            // окно) — окно берёт одобренный код у хоста. Только разрешённый модуль с одобренным кодом.
+            moduleCode: (b) => {
+                const id = String(b && b.id || "");
+                let code = typeof this.devModuleCode === "function" ? this.devModuleCode(id) : null;
+                if (typeof code !== "string" && b && b.lazy === true && this.modules.has(id) && typeof this.moduleCodeFor === "function") code = this.moduleCodeFor(id);
+                return typeof code === "string" ? { ok: true, code: code } : { ok: false, error: "модуль " + id.slice(0, 40) + " не в режиме разработки" };
+            },
+            command: (b) => this.onCommand(b),
+            picked: (b) => this.onPicked(b),
+            design: (b) => this.onDesign(b),
+            report: (b) => {
+                const res = this.pending.get(String(b.reqId || ""));
+                if (res) res(b);
+                return { ok: true };
+            },
+        };
+        return this._rpc;
     }
 
-    /** Время запуска окна: рантайм и каждый модуль (мс), пропущенные защитой запуска. */
-    onWindowTiming(body) {
-        const num = (v) => (typeof v === "number" && isFinite(v) && v >= 0 && v < 600000) ? v : null;
-        const mods = {};
-        if (body && body.modules && typeof body.modules === "object") {
-            Object.keys(body.modules).slice(0, 32).forEach((k) => { const v = num(body.modules[k]); if (/^[a-z][a-z0-9-]{1,31}$/.test(k) && v != null) mods[k] = v; });
-        }
-        const skipped = Array.isArray(body && body.skipped) ? body.skipped.filter((k) => /^[a-z][a-z0-9-]{1,31}$/.test(String(k))).slice(0, 32) : [];
-        const failed = Array.isArray(body && body.failed) ? body.failed.filter((k) => /^[a-z][a-z0-9-]{1,31}$/.test(String(k))).slice(0, 32) : [];
-        this.lastTiming = { at: Date.now(), runtime: num(body && body.runtime), modules: mods, skipped: skipped, failed: failed };
-        if (failed.length && typeof this.onModulesFailed === "function") {
-            Promise.resolve().then(() => this.onModulesFailed(failed)).catch((e) => log("модули не загрузились", e));
-        }
-        return { ok: true };
-    }
-
-    onWindowLog(body) {
-        const where = clip(body.where, 80);
-        const msg = clip(body.msg, P.MAX_LOG);
-        log("окно" + (where ? " [" + where + "]" : "") + ": " + msg + (body.stack ? "\n" + clip(body.stack, P.MAX_LOG) : ""));
-        const id = clip(body.snippet, 80);
-        if (id && S.validId(id)) {
-            const key = id + ":" + this.state.rev;
-            if (!this.errorsShown.has(key)) {
-                this.errorsShown.add(key);
-                vscode.window.showWarningMessage("Moon Core: ошибка в сниппете " + id + ": " + clip(msg, 200), "Открыть", "Журнал").then((pick) => {
-                    if (pick === "Открыть") this.open(id);
-                    if (pick === "Журнал") showLog();
-                });
-            }
-        }
-        return { ok: true };
-    }
-
-    async onCommand(body) {
-        const conf = vscode.workspace.getConfiguration("moonCore");
-        if (!conf.get("allowCommands", true)) return { ok: false, error: "команды из окна выключены (moonCore.allowCommands)" };
-        const id = String(body.id || "");
-        if (!CMD.validCommand(id)) return { ok: false, error: "bad command id" };
-        const from = S.validId(String(body.from || "")) ? String(body.from) : "";
-        const STORE = "mooncore.allowedCommands";
-        if (!this.deniedCommands) this.deniedCommands = new Set();
-        const verdict = CMD.decide(id, { enabled: true, setting: conf.get("allowedCommands", []), stored: this.context.globalState.get(STORE), denied: this.deniedCommands });
-        if (verdict === "deny") return { ok: false, error: "команда «" + id + "» запрещена" };
-        if (verdict === "ask") {
-            // Спрашиваем один раз на команду: «всегда» — в хранилище, «запретить» — до конца сессии.
-            const pick = await vscode.window.showWarningMessage(
-                "Moon Core: " + (from ? "сниппет «" + from + "»" : "окно") + " хочет выполнить команду VS Code «" + id + "». Разрешить?",
-                "Разрешить всегда", "Один раз", "Запретить");
-            if (pick === "Разрешить всегда") {
-                const list = CMD.cleanList(this.context.globalState.get(STORE)).concat([id]);
-                await this.context.globalState.update(STORE, list);
-                log("команда разрешена навсегда: " + id);
-            } else if (pick !== "Один раз") {
-                this.deniedCommands.add(id);
-                return { ok: false, error: "команда «" + id + "» не разрешена" };
-            }
-        }
-        const args = Array.isArray(body.args) ? body.args.slice(0, 10) : [];
-        try {
-            const result = await vscode.commands.executeCommand(id, ...args);
-            let safe = null;
-            try { safe = result === undefined ? null : JSON.parse(JSON.stringify(result)); } catch (e) { safe = null; }
-            return { ok: true, result: safe };
-        } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
+    async dispatch(method, body) {
+        const fn = Object.prototype.hasOwnProperty.call(this.rpcTable(), method) ? this.rpcTable()[method] : null;
+        return fn ? fn(body) : { ok: false, error: "unknown method" };
     }
 
     async onPicked(body) {
@@ -327,6 +278,10 @@ class Host {
 
     hostRef() { return { port: this.bridge.port, token: this.bridge.token }; }
 
+    /** Какие модули разрешены сейчас: окно выключает остальные и включает вернувшиеся без перезагрузки. */
+    moduleSetInfo() { return { ids: Array.from(this.modules.known.keys()) }; }
+    broadcastModuleSet() { this.bridge.broadcast("moduleSet", this.moduleSetInfo()); if (this.updateCommandContext) this.updateCommandContext(); }
+
     focusInfo() { return { focused: !!(vscode.window.state && vscode.window.state.focused) }; }
 
     pick() {
@@ -361,6 +316,6 @@ function mixin(target, part) {
         Object.defineProperty(target.prototype, k, Object.getOwnPropertyDescriptor(part.prototype, k));
     });
 }
-[require("./host-snippets"), require("./host-transfer"), require("./host-context"), require("./host-check"), require("./host-ui")].forEach((m) => mixin(Host, m.Part));
+[require("./host-snippets"), require("./host-gate"), require("./host-transfer"), require("./host-context"), require("./host-check"), require("./host-ui"), require("./host-vs")].forEach((m) => mixin(Host, m.Part));
 
 module.exports = { Host, PICKED_ID };

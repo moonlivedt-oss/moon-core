@@ -34,7 +34,7 @@ function cleanModules(m) {
     if (!m || typeof m !== "object" || Array.isArray(m)) return out;
     Object.keys(m).slice(0, 16).forEach((id) => {
         const v = m[id];
-        if (!MODULE_ID_RE.test(id) || !v || typeof v !== "object" || Array.isArray(v)) return;
+        if (!MODULE_ID_RE.test(id) || D.protoKey(id) || !v || typeof v !== "object" || Array.isArray(v)) return;
         let text;
         try { text = JSON.stringify(v); } catch (e) { return; }
         if (text.length <= MAX_MODULE_PART) out[id] = JSON.parse(text);
@@ -42,7 +42,7 @@ function cleanModules(m) {
     return out;
 }
 
-function cleanName(n) { const s = String(n == null ? "" : n).trim(); return NAME_RE.test(s) ? s : ""; }
+function cleanName(n) { const s = String(n == null ? "" : n).trim(); return NAME_RE.test(s) && !D.protoKey(s) ? s : ""; }
 
 /** Снимок для профиля: правила (без времени) + значения настроек. */
 function snapshot(d) {

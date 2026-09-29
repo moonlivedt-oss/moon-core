@@ -30,6 +30,11 @@
             dataUrl: typeof m.dataUrl === "string" ? m.dataUrl : "",
             // Стенд (test/serve.js) не умеет vscode-file: данные приходят прямо в boot.
             data: (m.data && typeof m.data === "object") ? m.data : null,
+            // Файл модуля рядом с оболочкой { src, integrity } (ленивая загрузка, повторное включение)
+            // и ленивость { delay }. Ленивый модуль не выполнен, пока его не загрузят.
+            file: m.file && typeof m.file.src === "string" && /^[\w.-]+\.js$/.test(m.file.src) ? { src: m.file.src, integrity: String(m.file.integrity || "") } : null,
+            lazy: m.lazy && typeof m.lazy === "object" ? { delay: Math.max(0, +m.lazy.delay || 0) } : null,
+            loaded: !(m.lazy && m.file), off: false,
         };
     });
 
@@ -83,6 +88,14 @@
 
     function deliverModule(rec, d) {
         if (!d || !MODS[d.id] || !MOD_EV_RE.test(String(d.event))) return;
+        // Разовое событие (клик, команда): не кэшируется — новые подписчики его не получат.
+        // Модуль ещё не загружен (ленивый) или выключен — событие ждёт загрузки.
+        if (d.once) {
+            if (d.scope === "window" && !isOwnHost(rec.token)) return;
+            if (!MODS[d.id].loaded || MODS[d.id].off) { queueOnce(d); return; }
+            fireModule(d.id, d.event, d.data);
+            return;
+        }
         var slot = (modLast[d.id] = modLast[d.id] || {});
         var last = (slot[d.event] = slot[d.event] || { all: null, win: {} });
         if (d.scope === "window") {
@@ -103,14 +116,14 @@
     }
 
     /** Запрос модуля: сначала свой хост; хост без обработчика или без связи — следующий. */
-    function moduleRpc(id, method, body) {
+    function moduleRpc(id, method, body, timeoutMs) {
         var prefer = ownToken && hosts[ownToken] ? hosts[ownToken] : null;
         var list = hostList(prefer);
         var i = 0;
         var req = { id: id, method: method, body: body === undefined ? null : body };
         function next() {
             if (i >= list.length) return Promise.resolve({ ok: false, error: "нет связи с расширением модуля" });
-            return rpc(list[i++], "module", req).then(function (r) {
+            return rpc(list[i++], "module", req, timeoutMs).then(function (r) {
                 return r && (r.retry || r.net || r.error === "no handler") ? next() : r;
             });
         }
@@ -167,9 +180,10 @@
             /** Последнее значение события (или undefined). */
             get: function (ev) { return lastModule(id, ev); },
             /** Запрос к своему расширению: Promise<{ok, result?, error?}>. */
-            rpc: function (method, body) {
+            rpc: function (method, body, opts) {
                 if (!MOD_EV_RE.test(String(method))) return Promise.resolve({ ok: false, error: "bad method" });
-                return moduleRpc(id, method, body);
+                var t = opts && typeof opts.timeoutMs === "number" && isFinite(opts.timeoutMs) ? opts.timeoutMs : 0;
+                return moduleRpc(id, method, body, t);
             },
             /** Ошибка модуля — в журнал Moon Core (Output «Moon Core»). */
             log: function (where, err) { report("модуль " + id + (err === undefined ? "" : ": " + where), err === undefined ? where : err); },
@@ -229,6 +243,8 @@
             /** Есть ли сейчас связь хотя бы с одним хостом. */
             connected: function () { return Object.keys(hosts).some(function (t) { return hosts[t].open; }); },
         };
+        // События VS Code, команды, окна, общая шина, части окна (21-vs.js, 83-windows.js, 84-shared.js).
+        extendModuleApi(id, modApis[id]);
         return modApis[id];
     }
 
@@ -245,7 +261,12 @@
         if (modHot[id] === d.sha) return;                      // уже перезапущен (событие от другого хоста)
         modHot[id] = d.sha;
         rpc(rec, "moduleCode", { id: id }).then(function (r) {
-            if (!r || !r.ok || typeof r.code !== "string") { report("модуль " + id + ": горячая перезагрузка", (r && r.error) || "хост не отдал код"); return; }
+            if (!r || !r.ok || typeof r.code !== "string") {
+                // Код не пришёл (хост занят, сеть) — следующее событие с тем же sha повторит попытку.
+                if (modHot[id] === d.sha) delete modHot[id];
+                report("модуль " + id + ": горячая перезагрузка", (r && r.error) || "хост не отдал код");
+                return;
+            }
             var list = modDispose[id] || [];
             modDispose[id] = [];
             for (var i = list.length - 1; i >= 0; i--) { try { list[i](); } catch (e) { report("модуль " + id + ": уборка", e); } }
@@ -256,7 +277,7 @@
             var s = document.createElement("script");
             if (NONCE) s.setAttribute("nonce", NONCE);
             s.setAttribute("data-mooncore-module", id);
-            s.textContent = "try{\n" + r.code + "\n}catch(e){window.__MOONCORE__.fail(" + JSON.stringify("модуль " + id) + ",e);}\n//# sourceURL=mooncore-module/" + id + ".js";
+            s.textContent = trustedScript("try{\n" + r.code + "\n}catch(e){window.__MOONCORE__.fail(" + JSON.stringify("модуль " + id) + ",e);}\n//# sourceURL=mooncore-module/" + id + ".js");
             headEl().appendChild(s);
             s.remove();
             try { toast("Moon Core: модуль " + (MODS[id].name || id) + " перезапущен"); } catch (e) {}

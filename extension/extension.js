@@ -16,8 +16,11 @@ const vscode = require("vscode");
 const { Host } = require("./lib/host");
 const inject = require("./lib/inject");
 const MH = require("./lib/module-host");
-const { openDoctor } = require("./lib/doctor");
-const { log, showLog, disposeLog } = require("./lib/log");
+const path = require("path");
+const { openDoctor, exportDiagnostics } = require("./lib/doctor");
+const { log, showLog, disposeLog, setLogFile } = require("./lib/log");
+const { storageDir } = require("./lib/storage");
+const { showPermissions, revokeAll } = require("./lib/ext/permissions");
 const { createStatus, menu, diagnostics } = require("./lib/ext/status");
 const { createSnippetView } = require("./lib/ext/snippet-tree");
 const { writeMainConf, mainStatus, deepCommand, windowLookCommand } = require("./lib/ext/window-look");
@@ -73,6 +76,11 @@ function registerCommands(context, refreshModules) {
     // Служебная (не в палитре): клик по элементу статусбара, который модуль создал через шлюз.
     context.subscriptions.push(vscode.commands.registerCommand("moonCore._nativeClick", (mod, item) => host.nativeClick(String(mod), String(item))));
     reg("moonCore.doctor", () => openDoctor(context, host));
+    reg("moonCore.moduleCommands", () => host.pickModuleCommand(false));
+    reg("moonCore.moduleCommandsHere", () => host.pickModuleCommand(true));
+    reg("moonCore.exportDiagnostics", () => exportDiagnostics(context, host));
+    reg("moonCore.permissions", () => showPermissions(context, host));
+    reg("moonCore.revokeAll", () => revokeAll(context, host));
     reg("moonCore.deep", () => deepCommand());
     reg("moonCore.windowLook", () => windowLookCommand());
     reg("moonCore.exportAll", () => host.exportCommand());
@@ -90,6 +98,8 @@ function registerCommands(context, refreshModules) {
 
 function activate(context) {
     try {
+        // Журнал и в файл: Output пропадает с окном, а файл нужен, когда VS Code не открылся.
+        setLogFile(path.join(storageDir(context), "mooncore.log"));
         host = new Host(context);
         createSnippetView(context, host);
         const refreshModules = watchModules(context, host);
@@ -100,9 +110,14 @@ function activate(context) {
         host.onModulesFailed = (ids) => inject.onModulesFailed(context, ids);
         host.onUiFailed = (body) => inject.onUiFailed(context, body);
         host.devModuleCode = (id) => MH.devCode(context, id);
+        host.moduleCodeFor = (id) => { const s = inject.moduleSet(context).scripts.find((x) => x.id === id); return s ? s.code : null; };
         createStatus(context, host);
         host.modules.setModules(MH.allowed(context));
-        inject.checkOnActivate(context)
+        // Свои модули (фон, окно документации) разрешаются до внедрения: тогда первое же
+        // внедрение приносит их в оболочку, и перезагрузка нужна одна.
+        MH.autoAllowOwn(context)
+            .catch((e) => log("свои модули", e))
+            .then(() => { host.modules.setModules(MH.allowed(context)); return inject.checkOnActivate(context); })
             .then(() => refreshModules(true))
             .catch((e) => log("проверка внедрения", e));
         host.autoCheckAfterUpdate().catch((e) => log("проверка после обновления VS Code", e));
@@ -114,6 +129,7 @@ function activate(context) {
         }));
         if (host.syncEnabled()) host.syncIn(true).catch((e) => log("синхронизация", e));
         host.watchContext();
+        host.watchVs();
         log("Moon Core активирован");
         return makeApi(context);
     } catch (e) {

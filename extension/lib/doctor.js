@@ -9,7 +9,11 @@ const crypto = require("crypto");
 const inject = require("./inject");
 const MH = require("./module-host");
 const DM = require("./doctor-model");
-const { log, showLog, recentLog, redact } = require("./log");
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
+const { log, showLog, recentLog, redact, logFilePath, flushFile } = require("./log");
+const PM = require("./ext/permissions");
 const { diagnosticLines } = require("./ext/status");
 
 let panel = null;
@@ -38,6 +42,9 @@ function snapshot(context, host, check) {
         },
         check: check || null,
         recovery: inject.recoveryPath(context),
+        errors: typeof host.errorTop === "function" ? host.errorTop(8) : [],
+        permissions: PM.summary(context),
+        logFile: logFilePath(),
     };
 }
 
@@ -55,7 +62,10 @@ function render(s, list, nonce, busy) {
         (x.deep ? "<br><small>сервисы окна: " + (x.deep.di ? "включены" : x.deep.diSupported ? "выключены" : "не поддерживаются") + ", главный процесс: " + (x.deep.main ? "включён" : "выключен") + "</small>" : ""))).join("");
     const b = s.bridge;
     const t = s.timing;
-    const timing = t ? "рантайм " + esc(t.runtime) + " мс" + Object.keys(t.modules).map((k) => ", " + esc(k) + " " + esc(t.modules[k]) + " мс").join("") : "данных ещё нет";
+    const timing = t ? "рантайм " + esc(t.runtime) + " мс" + Object.keys(t.modules).map((k) => ", " + esc(k) + " " + esc(t.modules[k]) + " мс").join("") +
+        (t.stages && Object.keys(t.stages).length ? "<br><small>этапы: " + Object.keys(t.stages).sort((a, c) => t.stages[a] - t.stages[c]).map((k) => esc(k) + " " + esc(t.stages[k]) + " мс").join(", ") + "</small>" : "") : "данных ещё нет";
+    const errs = (s.errors || []).length ? s.errors.map((e) => esc(e.source) + " — " + esc(e.n)).join(", ") : "ошибок окна не было";
+    const methods = b.byMethod ? Object.keys(b.byMethod).sort((x, y) => b.byMethod[y] - b.byMethod[x]).slice(0, 6).map((k) => esc(k) + " " + esc(b.byMethod[k])).join(", ") : "";
     const mods = s.modules.found.length ? s.modules.found.map((m) => "<li><b>" + esc(m.name) + "</b> <code>" + esc(m.id) + "</code> " + esc(m.version || "") +
         " — " + esc(m.source) + (m.allowed ? "" : " <span class=bad>не разрешён</span>") + (m.dev ? " <span class=tag>разработка</span>" : "") + "</li>").join("") : "<li>модулей нет</li>";
     const c = s.check;
@@ -93,6 +103,7 @@ code,small{opacity:.75} ul{margin:0;padding-left:18px} .bar{display:flex;gap:8px
 <button data-cmd=inject class=sec>Внедрить заново</button><button data-cmd=modules class=sec>Модули</button>
 <button data-cmd=moduleDev class=sec>Режим разработки</button><button data-cmd=log class=sec>Журнал</button>
 <button data-cmd=report class=sec title="Диагностика и последние строки журнала — без имени пользователя и токенов">Скопировать отчёт</button>
+<button data-cmd=export class=sec title="Отчёт, снимок состояния и копии оболочки — в папку для разбора без доступа к машине">Экспорт в файл</button>
 </div>
 <h2>Что не так</h2>${probs}
 <h2>Оболочка VS Code</h2><table>${row("VS Code / Moon Core", esc(s.vscode) + " / " + esc(s.ext))}${shells}
@@ -100,11 +111,15 @@ ${row("Аварийное восстановление", "<code>" + esc(s.recove
 <h2>Связь и запуск</h2><table>
 ${row("Мост", b.running ? "127.0.0.1:" + esc(b.port) + ", окон на связи: " + esc(b.streams) + ", запросов: " + esc(b.requests) : yes(false, "", "не поднят"))}
 ${row("Время запуска окна", timing)}
+${row("Ошибки окна", errs)}
+${row("Запросы по методам", methods || "—")}${b.rejected || b.dropped ? row("Отклонено", "по лимиту " + esc(b.rejected || 0) + ", зависших окон отключено " + esc(b.dropped || 0)) : ""}
 ${row("Проверка селекторов", esc(checkLine))}</table>
 <h2>Вид</h2><table>
 ${row("Конструктор", "правил " + s.design.rules + ", настроек VS Code " + s.design.settings + (s.design.active ? ", профиль «" + esc(s.design.active) + "»" + (s.design.dirty ? " (изменён)" : "") : ""))}
 ${row("Свои профили", esc(s.design.profiles))}
-${row("Сниппеты", "включено " + s.snippets.on + " из " + s.snippets.total)}</table>
+${row("Сниппеты", "включено " + s.snippets.on + " из " + s.snippets.total)}
+${row("Разрешения", esc(s.permissions || "") + " <button data-cmd=permissions class=sec>Журнал разрешений</button>")}
+${row("Файл журнала", "<code>" + esc(s.logFile || "выключен") + "</code>")}</table>
 <h2>Модули</h2><ul>${mods}</ul>
 <script nonce="${nonce}">
 const vs = acquireVsCodeApi();
@@ -126,6 +141,33 @@ function reportText(context, host, lastCheck) {
         ["", "=== Доктор: " + DM.verdict(DM.problems(s)) + " ==="], probs.length ? probs : ["  проблем нет"],
         ["", "=== Журнал (последние строки) ==="], recentLog(80),
     ).map((l) => redact(l)).join("\n");
+}
+
+/**
+ * Экспорт диагностики в папку: отчёт, снимок состояния (JSON), журнал из файла и копии оболочек
+ * (без нашего блока нет смысла — оболочка как есть, с блоком). Для разбора проблемы без доступа
+ * к машине: папку можно заархивировать и приложить к issue. Имя пользователя и токены вырезаны.
+ */
+async function exportDiagnostics(context, host, lastCheck) {
+    const pick = await vscode.window.showOpenDialog({ canSelectFolders: true, canSelectFiles: false, canSelectMany: false, openLabel: "Сохранить диагностику сюда", defaultUri: vscode.Uri.file(os.homedir()) });
+    if (!pick || !pick[0]) return null;
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const dir = path.join(pick[0].fsPath, "moon-core-diagnostics-" + stamp);
+    fs.mkdirSync(dir, { recursive: true });
+    const put = (name, text) => fs.writeFileSync(path.join(dir, name), redact(text), "utf8");
+    put("report.txt", reportText(context, host, lastCheck));
+    put("snapshot.json", JSON.stringify(snapshot(context, host, lastCheck), null, 2));
+    flushFile();
+    [logFilePath(), logFilePath() && logFilePath() + ".1"].filter(Boolean).forEach((f, i) => {
+        try { put(i ? "mooncore.log.1" : "mooncore.log", fs.readFileSync(f, "utf8")); } catch (e) {}
+    });
+    (inject.status(context) || []).forEach((x, i) => {
+        try { put("shell-" + i + "-" + path.basename(x.file), fs.readFileSync(x.file, "utf8")); } catch (e) {}
+    });
+    log("диагностика сохранена: " + dir);
+    const r = await vscode.window.showInformationMessage("Moon Core: диагностика сохранена (без имени пользователя и токенов).", "Открыть папку");
+    if (r) await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(path.join(dir, "report.txt")));
+    return dir;
 }
 
 const NONCE_MARK = "__MOONCORE_NONCE__";
@@ -165,6 +207,8 @@ async function openDoctor(context, host) {
             else if (cmd === "recovery") await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(inject.recoveryPath(context)));
             else if (cmd === "design") host.toggleDesign();
             else if (cmd === "jsReview") { host.jsAsked = new Set(); await host.askJsPending(); }
+            else if (cmd === "permissions") await PM.showPermissions(context, host);
+            else if (cmd === "export") await exportDiagnostics(context, host, lastCheck);
             else if (cmd === "report") {
                 await vscode.env.clipboard.writeText(reportText(context, host, lastCheck));
                 vscode.window.setStatusBarMessage("Moon Core: отчёт скопирован — вставь его в issue", 5000);
@@ -176,4 +220,4 @@ async function openDoctor(context, host) {
     if (host.bridge.status().streams) check();
 }
 
-module.exports = { openDoctor, snapshot, render, reportText };
+module.exports = { openDoctor, snapshot, render, reportText, exportDiagnostics };

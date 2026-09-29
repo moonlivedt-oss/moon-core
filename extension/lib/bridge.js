@@ -33,6 +33,13 @@ const PORTS = Array.from({ length: P.BRIDGE_PORT_COUNT }, (_, i) => P.BRIDGE_POR
 const METHODS = new Set(P.METHODS);
 const REFRESH_MS = 30000;   // держим себя в списке: другой хост мог затереть файл одновременно
 const BEAT_MS = 25000;      // пульс потокам: без трафика соединение могут оборвать
+// Окно, которое не читает поток (зависло, стоит в отладчике), копит в памяти хоста всё, что ему
+// шлют: состояние с каталогом — десятки КБ на каждую правку. Больше этого в буфере — отключаем,
+// окно само переподключится (EventSource) и первым событием получит свежее состояние.
+const MAX_BUFFERED = 4 * 1024 * 1024;
+// Методы со своим лимитом: поток ошибок окна (log) или время запуска не съедают лимит
+// конструктора и команд — и наоборот.
+const OWN_BUCKET = { log: 300, timing: 60 };
 
 function pidAlive(pid) {
     if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -71,14 +78,19 @@ function createBridge(opts) {
     const token = crypto.randomBytes(24).toString("hex");
     const allowOrigin = opts.origin || ORIGIN;
     const clients = new Set();
-    let port = 0, lastSeen = 0, requests = 0, disposed = false, rejected = 0;
+    let port = 0, lastSeen = 0, requests = 0, disposed = false, rejected = 0, dropped = 0;
+    const byMethod = {};
     // Ограничение частоты: окно шлёт немного (журнал ошибок сам себя ограничивает), поэтому
     // поток сотен запросов в секунду — это не окно, а кто-то, кто подобрал токен или сломался.
-    let windowStart = Date.now(), windowCount = 0;
-    const overLimit = () => {
+    // Окно 10 с на корзину: общая для всех методов и отдельные для OWN_BUCKET.
+    const buckets = new Map();
+    const overLimit = (method) => {
+        const name = Object.prototype.hasOwnProperty.call(OWN_BUCKET, method) ? method : "*";
+        const limit = name === "*" ? P.RPC_LIMIT_PER_10S : OWN_BUCKET[name];
         const t = Date.now();
-        if (t - windowStart > 10000) { windowStart = t; windowCount = 0; }
-        return ++windowCount > P.RPC_LIMIT_PER_10S;
+        let b = buckets.get(name);
+        if (!b || t - b.start > 10000) { b = { start: t, count: 0 }; buckets.set(name, b); }
+        return ++b.count > limit;
     };
 
     const sameToken = (a) => {
@@ -91,8 +103,23 @@ function createBridge(opts) {
         res.write("event: " + event + "\ndata: " + text.replace(/\r?\n/g, "\ndata: ") + "\n\n");
     }
 
+    function dropClient(res) {
+        clients.delete(res);
+        try { res.destroy(); } catch (e) {}
+    }
+    /** Поток переполнен (окно не читает) — отключить. true — отключили. */
+    function stalled(res) {
+        if (!(res.writableLength > MAX_BUFFERED)) return false;
+        dropped++;
+        log("мост: окно не читает поток (" + Math.round(res.writableLength / 1024) + " КБ в очереди) — отключено");
+        dropClient(res);
+        return true;
+    }
     function broadcast(event, data) {
-        for (const res of clients) { try { sse(res, event, data); } catch (e) { clients.delete(res); } }
+        for (const res of clients) {
+            if (stalled(res)) continue;
+            try { sse(res, event, data); } catch (e) { dropClient(res); }
+        }
     }
 
     function readBody(req, cb) {
@@ -147,13 +174,14 @@ function createBridge(opts) {
         if (!METHODS.has(method)) return end(404, "method");
         // Только JSON: «простой» запрос (form/text) браузер шлёт без предварительной проверки CORS.
         if (!/^application\/json\b/i.test(String(req.headers["content-type"] || ""))) return end(415, "type");
-        if (overLimit()) { rejected++; if (rejected === 1 || rejected % 500 === 0) log("мост: слишком много запросов, лишние отклонены (" + rejected + ")"); return end(429, "rate"); }
+        if (overLimit(method)) { rejected++; if (rejected === 1 || rejected % 500 === 0) log("мост: слишком много запросов, лишние отклонены (" + rejected + ")"); return end(429, "rate"); }
         readBody(req, (text) => {
             if (text == null) { if (!res.writableEnded && !res.destroyed) end(413, "size"); return undefined; }
             let body;
             try { body = JSON.parse(text); } catch (e) { return end(400, "json"); }
             if (!body || typeof body !== "object" || Array.isArray(body)) return end(400, "json");
             requests++;
+            byMethod[method] = (byMethod[method] || 0) + 1;
             // «Команда» должна выполниться в том окне, где нажали кнопку: это окно в фокусе.
             if (method === "command" && opts.isFocused && !opts.isFocused()) {
                 return end(409, JSON.stringify({ ok: false, retry: true }), "application/json; charset=utf-8");
@@ -210,7 +238,9 @@ function createBridge(opts) {
         tryNext();
     });
     const refresh = setInterval(registerSelf, REFRESH_MS);
-    const beat = setInterval(() => { for (const r of clients) { try { r.write(": ping\n\n"); } catch (e) { clients.delete(r); } } }, BEAT_MS);
+    const beat = setInterval(() => {
+        for (const r of clients) { if (!stalled(r)) { try { r.write(": ping\n\n"); } catch (e) { dropClient(r); } } }
+    }, BEAT_MS);
     if (refresh.unref) refresh.unref();
     if (beat.unref) beat.unref();
 
@@ -219,7 +249,7 @@ function createBridge(opts) {
         get port() { return port; },
         get token() { return token; },
         broadcast: broadcast,
-        status: () => ({ running: port > 0 && !disposed, port: port, lastSeen: lastSeen, requests: requests, streams: clients.size, rejected: rejected }),
+        status: () => ({ running: port > 0 && !disposed, port: port, lastSeen: lastSeen, requests: requests, streams: clients.size, rejected: rejected, dropped: dropped, byMethod: Object.assign({}, byMethod) }),
         dispose() {
             if (disposed) return;
             disposed = true;
@@ -234,4 +264,4 @@ function createBridge(opts) {
     };
 }
 
-module.exports = { createBridge, readHosts, pidAlive, ORIGIN, PORTS };
+module.exports = { createBridge, readHosts, pidAlive, ORIGIN, PORTS, MAX_BUFFERED, OWN_BUCKET };

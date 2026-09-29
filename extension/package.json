@@ -224,6 +224,35 @@
         "title": "Вид окна (прозрачность, акрил, поверх всех)",
         "category": "Moon Core",
         "icon": "$(window)"
+      },
+      {
+        "command": "moonCore.permissions",
+        "title": "Разрешения (журнал решений)",
+        "category": "Moon Core",
+        "icon": "$(shield)"
+      },
+      {
+        "command": "moonCore.revokeAll",
+        "title": "Отозвать все разрешения",
+        "category": "Moon Core",
+        "icon": "$(circle-slash)"
+      },
+      {
+        "command": "moonCore.exportDiagnostics",
+        "title": "Экспорт диагностики в файл",
+        "category": "Moon Core",
+        "icon": "$(export)"
+      },
+      {
+        "command": "moonCore.moduleCommands",
+        "title": "Команды модулей",
+        "category": "Moon Core",
+        "icon": "$(extensions)"
+      },
+      {
+        "command": "moonCore.moduleCommandsHere",
+        "title": "Moon Core: команды модулей для этого места",
+        "category": "Moon Core"
       }
     ],
     "menus": {
@@ -368,6 +397,21 @@
         {
           "command": "moonCore.deleteSnippet",
           "when": "false"
+        },
+        {
+          "command": "moonCore.moduleCommands",
+          "when": "moonCore.hasModuleCommands"
+        },
+        {
+          "command": "moonCore.moduleCommandsHere",
+          "when": "false"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "moonCore.moduleCommandsHere",
+          "when": "moonCore.moduleCommandAnyLang || resourceLangId in moonCore.moduleCommandLangs",
+          "group": "navigation@90"
         }
       ]
     },
@@ -510,9 +554,15 @@
           "description": "Пересчитывать контрольную сумму оболочки в product.json, чтобы VS Code не писал «установка повреждена». Исходное значение хранится в бэкапе и возвращается при снятии.",
           "scope": "machine"
         },
+        "moonCore.autoInject": {
+          "type": "boolean",
+          "default": true,
+          "description": "Встроиться в VS Code самому при первом запуске после установки — без вопросов и настройки (останется только перезагрузить окно). Выключено — Moon Core спросит.",
+          "scope": "machine"
+        },
         "moonCore.autoReinject": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "После обновления VS Code встраивать Moon Core заново без вопроса (останется только перезагрузить окно).",
           "scope": "machine"
         },

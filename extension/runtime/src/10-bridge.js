@@ -46,7 +46,12 @@
         try { rec.es = new EventSource("http://127.0.0.1:" + rec.port + "/events/" + rec.token); }
         catch (e) { return; }
         hosts[rec.token] = rec;
-        rec.es.onopen = function () { rec.errors = 0; rec.open = true; if (hasFocus() && !ownToken) probeOwnHost(); };
+        rec.es.onopen = function () {
+            stage("bridge"); rec.errors = 0; rec.open = true;
+            if (hasFocus() && !ownToken) probeOwnHost();
+            // Новый (или вернувшийся) хост не знает подписок модулей на события VS Code и их команд.
+            setTimeout(function () { try { vsResubscribe(null); } catch (e) {} }, 0);
+        };
         rec.es.onerror = function () {
             rec.open = false;
             // Хост из файла мёртв (адрес прошлого сеанса) — не переподключаемся вечно.
@@ -68,6 +73,8 @@
         on(rec, "profile", function (d) { applyModuleProfile(d); });
         on(rec, "moduleReload", function (d) { hotReloadModule(rec, d); });
         on(rec, "ctx", function (d) { onCtx(rec, d); });
+        on(rec, "vs", function (d) { deliverVs(rec, d); });
+        on(rec, "moduleSet", function (d) { applyModuleSet(rec, d); });
     }
     function on(rec, ev, fn) {
         rec.es.addEventListener(ev, function (e) {
@@ -92,10 +99,15 @@
         return list;
     }
 
-    function rpc(h, method, body) {
+    // timeoutMs — своё ожидание (долгие запросы модулей: компиляция); по умолчанию RPC_TIMEOUT_MS.
+    // Оборвали по времени — ответ { timeout: true }, а не { net: true }: хост, скорее всего, жив и
+    // ещё работает, и слать тот же запрос следующему хосту (второй раз выполнять) нельзя.
+    function rpc(h, method, body, timeoutMs) {
         if (typeof fetch !== "function") return Promise.resolve({ ok: false, error: "нет fetch" });
         var ctl = typeof AbortController === "function" ? new AbortController() : null;
-        var timer = setTimeout(function () { if (ctl) ctl.abort(); }, PROTO.RPC_TIMEOUT_MS || 8000);
+        var timedOut = false;
+        var wait = timeoutMs > 0 ? Math.min(timeoutMs, 10 * 60000) : (PROTO.RPC_TIMEOUT_MS || 8000);
+        var timer = setTimeout(function () { timedOut = true; if (ctl) ctl.abort(); }, wait);
         return fetch("http://127.0.0.1:" + h.port + "/rpc/" + h.token + "/" + method, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -105,7 +117,10 @@
         }).then(function (res) {
             if (res.status === 409) return { ok: false, retry: true };
             return res.json().catch(function () { return { ok: res.ok }; });
-        }).catch(function (e) { return { ok: false, error: String(e && e.message || e), net: true }; })
+        }).catch(function (e) {
+            if (timedOut) return { ok: false, error: "нет ответа за " + Math.round(wait / 1000) + " с", timeout: true };
+            return { ok: false, error: String(e && e.message || e), net: true };
+        })
           .then(function (out) { clearTimeout(timer); return out; });
     }
 

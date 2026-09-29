@@ -12,9 +12,25 @@ const path = require("path");
 const AP = require("./autoprofile");
 const PR = require("./project");
 const { log } = require("./log");
+const KEYS = require("./keys");
+const AU = require("./audit");
 
-const PROJECT_KEY = "mooncore.projectProfiles";   // путь папки -> { sha, ok } — ответ про файл проекта
+const PROJECT_KEY = KEYS.PROJECT_PROFILES;   // путь папки -> { sha, ok } — ответ про файл проекта
 const THEME_KINDS = { 1: "light", 2: "dark", 3: "highContrast", 4: "highContrastLight" };
+
+/**
+ * Ответов про проекты не больше MAX_PROJECTS: иначе карта в globalState растёт с каждой
+ * открытой когда-либо папкой. Уходят самые старые (at — время ответа; старые записи без него).
+ */
+const MAX_PROJECTS = 200;
+function capProjects(map) {
+    const keys = Object.keys(map);
+    if (keys.length <= MAX_PROJECTS) return map;
+    const keep = keys.sort((a, b) => (Number(map[b].at) || 0) - (Number(map[a].at) || 0)).slice(0, MAX_PROJECTS);
+    const out = {};
+    keep.forEach((k) => { out[k] = map[k]; });
+    return out;
+}
 
 class ContextPart {
     /** Контекст окна: язык активного файла, папка проекта, git-ветка, вид темы, минуты от полуночи. */
@@ -82,6 +98,9 @@ class ContextPart {
     async projectTarget() {
         const folder = this.projectFolder();
         if (!folder) return "";
+        // Недоверенная папка (Restricted Mode): файл из чужого репозитория даже не предлагаем —
+        // вопрос «включить вид проекта?» там сам по себе приманка. Доверие дадут — спросим.
+        if (vscode.workspace.isTrusted === false) return "";
         let text;
         try {
             const f = this.projectFile(folder);
@@ -108,8 +127,9 @@ class ContextPart {
             } finally { this.projectAsking = false; }
             if (pick === "Посмотреть файл") { await vscode.window.showTextDocument(vscode.Uri.file(this.projectFile(folder))); return ""; }
             if (!pick) return "";                               // закрыли — спросим в следующий раз
-            rec = map[key] = { sha: parsed.sha, ok: pick === "Включать" };
-            await this.context.globalState.update(PROJECT_KEY, map);
+            rec = map[key] = { sha: parsed.sha, ok: pick === "Включать", at: Date.now() };
+            await this.context.globalState.update(PROJECT_KEY, capProjects(map));
+            AU.record(this.context.globalState, "project", folder.name + " (" + PR.describe(parsed) + ")", rec.ok ? "allow" : "deny").catch(() => {});
             log("профиль проекта " + folder.name + ": " + (rec.ok ? "разрешён" : "отклонён"));
         }
         if (!rec.ok) return "";
@@ -145,8 +165,8 @@ class ContextPart {
         fs.writeFileSync(file, text, "utf8");
         // Файл создан здесь и сейчас — согласие на него уже есть.
         const map = Object.assign({}, this.context.globalState.get(PROJECT_KEY) || {});
-        map[folder.uri.fsPath.toLowerCase()] = { sha: PR.sha256(text), ok: true };
-        await this.context.globalState.update(PROJECT_KEY, map);
+        map[folder.uri.fsPath.toLowerCase()] = { sha: PR.sha256(text), ok: true, at: Date.now() };
+        await this.context.globalState.update(PROJECT_KEY, capProjects(map));
         await this.onDesign({ ops: [{ op: "putProfile", name: PR.profileName(folder.name), profile: PR.parse(text).profile }] });
         const pick = await vscode.window.showInformationMessage("Moon Core: вид сохранён в " + PR.FILE + " (правок: " + n + "). Файл можно закоммитить — у других он включится после их согласия.", "Открыть файл");
         if (pick) await vscode.window.showTextDocument(vscode.Uri.file(file));
@@ -158,6 +178,7 @@ class ContextPart {
         subs.push(vscode.window.onDidChangeActiveTextEditor(bump));
         subs.push(vscode.window.onDidChangeWindowState((s) => { if (s.focused) { this.ctxForce = true; bump(); } }));
         subs.push(vscode.workspace.onDidChangeWorkspaceFolders(bump));
+        if (vscode.workspace.onDidGrantWorkspaceTrust) subs.push(vscode.workspace.onDidGrantWorkspaceTrust(bump));
         if (vscode.window.onDidChangeActiveColorTheme) subs.push(vscode.window.onDidChangeActiveColorTheme(bump));
         subs.push(vscode.workspace.onDidChangeConfiguration((e) => {
             if (e.affectsConfiguration("moonCore.autoProfiles") || e.affectsConfiguration("moonCore.autoProfileDefault")) { this.armTimeTimer(); bump(); }
@@ -171,8 +192,9 @@ class ContextPart {
             const hook = () => {
                 try {
                     const api = ext.exports.getAPI(1);
-                    subs.push(api.onDidOpenRepository((repo) => subs.push(repo.state.onDidChange(bump))));
-                    api.repositories.forEach((repo) => subs.push(repo.state.onDidChange(bump)));
+                    const git = () => { bump(); if (this.gitChanged) this.gitChanged(); };
+                    subs.push(api.onDidOpenRepository((repo) => subs.push(repo.state.onDidChange(git))));
+                    api.repositories.forEach((repo) => subs.push(repo.state.onDidChange(git)));
                     bump();
                 } catch (e) { log("профиль по контексту: git", e); }
             };
@@ -193,4 +215,4 @@ class ContextPart {
     }
 }
 
-module.exports = { Part: ContextPart };
+module.exports = { Part: ContextPart, capProjects, MAX_PROJECTS };

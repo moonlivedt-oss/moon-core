@@ -33,25 +33,9 @@
             return Array.prototype.map.call(new Uint8Array(buf), function (b) { return ("0" + b.toString(16)).slice(-2); }).join("");
         });
     }
-    function isCspError(e) {
-        return (typeof EvalError === "function" && e instanceof EvalError) || /unsafe-eval|Content Security Policy|Trusted ?Type/i.test(String(e && e.message || e));
-    }
-    // Trusted Types: VS Code пускает код из строки только через политику из списка CSP; Moon Core
-    // вписывает туда «mooncore» при внедрении. Политика создаётся сразу (имя не займёт чужой
-    // скрипт) и пропускает только ту строку, которую загрузчик сверил по SHA-256.
-    var uiPolicy = null, uiVerified = null;
-    try {
-        if (window.trustedTypes && typeof window.trustedTypes.createPolicy === "function") {
-            uiPolicy = window.trustedTypes.createPolicy("mooncore", {
-                createScript: function (s) { if (s !== uiVerified) throw new Error("Moon Core: непроверенный код"); return s; },
-            });
-        }
-    } catch (e) { uiPolicy = null; }   // имени нет в списке CSP — eval попробуем как есть
-    function trustedScript(code) {
-        if (!uiPolicy) return code;
-        uiVerified = code;
-        try { return uiPolicy.createScript(code); } finally { uiVerified = null; }
-    }
+    // Trusted Types — политика «mooncore» (05-trusted.js): код чанка проходит её только после
+    // сверки SHA-256 ниже.
+    var isCspError = isCodeBlocked;
     /** Прямой eval: код чанка видит область рантайма (свои функции он объявляет у себя). */
     function evalUi(code) { return eval(trustedScript(code)); }
 

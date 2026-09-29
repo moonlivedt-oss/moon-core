@@ -168,8 +168,8 @@
         var fn = null;
         try { fn = new Function("mc", "\"use strict\";\n" + code + "\n//# sourceURL=mooncore/" + id); }
         catch (e) {
-            if (!(e instanceof EvalError) && !/unsafe-eval|Content Security Policy/i.test(String(e && e.message))) { report("синтаксис", e, id); return; }
-            fn = null;       // CSP запрещает eval — исполняем через <script nonce>
+            if (!isCodeBlocked(e)) { report("синтаксис", e, id); return; }
+            fn = null;       // CSP или Trusted Types запрещают eval — исполняем через <script nonce>
         }
         if (fn) {
             try {
@@ -182,7 +182,7 @@
         window.__MOONCORE_RUN__[id] = api;
         var s = document.createElement("script");
         if (NONCE) s.setAttribute("nonce", NONCE);
-        s.textContent = "(function(mc){\"use strict\";try{\n" + code + "\n}catch(e){window.__MOONCORE__.fail(" + JSON.stringify(id) + ",e);}})(window.__MOONCORE_RUN__[" + JSON.stringify(id) + "]);";
+        s.textContent = trustedScript("(function(mc){\"use strict\";try{\n" + code + "\n}catch(e){window.__MOONCORE__.fail(" + JSON.stringify(id) + ",e);}})(window.__MOONCORE_RUN__[" + JSON.stringify(id) + "]);");
         headEl().appendChild(s);
         s.remove();
     }

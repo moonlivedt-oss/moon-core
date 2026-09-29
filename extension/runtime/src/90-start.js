@@ -10,10 +10,13 @@
     }
 
     applyState(parse(readSync(BOOT.stateUrl)) || BOOT.state || null);
+    stage("state");
 
     whenWorkbench(function () {
         domReady = true;
+        stage("workbench");
         render(false);
+        stage("snippets");
         afterDS();
         // VS Code перерисовывает статусбар и титлбар — свои кнопки возвращаем на место.
         setInterval(function () { try { ensureButtons(); } catch (e) {} }, 1500);
@@ -61,8 +64,9 @@
                 function () { if (++tries < 4) setTimeout(send, 5000); });
         })();
     }
-    if (document.readyState === "complete") setTimeout(bootOk, 4000);
-    else window.addEventListener("load", function () { setTimeout(bootOk, 4000); });
+    function onLoaded() { stage("load"); scheduleLazy(); setTimeout(bootOk, 4000); }
+    if (document.readyState === "complete") onLoaded();
+    else window.addEventListener("load", onLoaded);
 
     window.__MOONCORE__ = {
         version: BOOT.version || "",
@@ -101,6 +105,12 @@
         fail: function (id, e) { report("выполнение", e, id); },
         /** Помощник модуля (null — модуль не впечатан). */
         module: moduleApi,
+        /** Загрузить ленивый (или снова включить выключенный) модуль: Promise<boolean>. */
+        loadModule: function (id) { return loadModule(String(id)); },
+        /** Состояние модуля: { loaded, off, lazy } или null. */
+        moduleState: function (id) { var m = MODS[id]; return m ? { loaded: !!m.loaded, off: !!m.off, lazy: !!m.lazy } : null; },
+        /** Общая шина модулей — только чтение (сниппеты и отладка). */
+        shared: { get: function (k) { return sharedGet(k); }, on: function (k, fn) { return sharedOn(k, fn); } },
         info: function () {
             return {
                 rev: rev, domReady: domReady,

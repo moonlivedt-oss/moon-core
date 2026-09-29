@@ -8,6 +8,7 @@ const vscode = require("vscode");
 const crypto = require("crypto");
 const K = require("./checks");
 const { log, showLog } = require("./log");
+const KEYS = require("./keys");
 
 const CHECK_TIMEOUT_MS = 3000;
 
@@ -66,7 +67,7 @@ class CheckPart {
      * Проверяет хост окна в фокусе (окон может быть несколько, хватит одного отчёта).
      */
     async autoCheckAfterUpdate() {
-        const KEY = "mooncore.checkedVersion";
+        const KEY = KEYS.CHECKED_VERSION;
         const gs = this.context.globalState;
         const ver = vscode.version;
         const last = gs.get(KEY);

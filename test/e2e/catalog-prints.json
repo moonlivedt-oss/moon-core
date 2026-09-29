@@ -1,6 +1,6 @@
 {
   "vscode": "1.139.1",
-  "at": "2026-09-27",
+  "at": "2026-09-29",
   "prints": {
     "banner": {
       "alts": [
@@ -371,8 +371,7 @@
       "tag": "div",
       "text": "1",
       "cls": [
-        "line-numbers",
-        "active-line-number"
+        "line-numbers"
       ],
       "cat": "lineNumbers",
       "whole": true
@@ -407,8 +406,10 @@
       "tag": "div",
       "role": "presentation",
       "cls": [
+        "invisible",
         "scrollbar",
-        "horizontal"
+        "horizontal",
+        "fade"
       ],
       "pcls": [
         "monaco-scrollable-element",

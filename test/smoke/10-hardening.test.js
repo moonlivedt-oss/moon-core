@@ -47,13 +47,26 @@ test("CSP: nonce не ломает 'unsafe-inline' VS Code, а где его н�
     assert.ok(/style-src 'self' 'nonce-N0NCE002'/.test(b));
     assert.strictEqual(W.stripBlock(W.applyBlock(b, W.buildBlock({}, "1", { nonce: "N0NCE002", version: "1" }))).includes("N0NCE002"), false, "снятие убирает свой nonce");
     // script-src нет: новая директива копирует default-src (иначе скрипты VS Code отрезаны),
-    // после снятия не остаётся пустой «script-src;», которая запретила бы все скрипты.
-    const c = W.armCsp(withCsp("default-src 'self' vscode-file:; style-src 'self' 'unsafe-inline'"), "N0NCE003", "");
+    // а снятие убирает её целиком — оболочка снова байт в байт исходная (иначе хэш не сойдётся).
+    const cBase = withCsp("default-src 'self' vscode-file:; style-src 'self' 'unsafe-inline'");
+    const c = W.armCsp(cBase, "N0NCE003", "");
     assert.ok(/script-src 'self' vscode-file: 'nonce-N0NCE003'; default-src/.test(c), c);
     const cOff = W.stripBlock(W.applyBlock(c, W.buildBlock({}, "1", { nonce: "N0NCE003", version: "1" })));
-    assert.ok(!/script-src\s*;/.test(cOff) && /script-src 'self' vscode-file:;/.test(cOff), cOff);
+    assert.strictEqual(cOff, cBase);
+    const nBase = withCsp("default-src 'none'; connect-src 'self'");
+    const n1 = W.armCsp(W.applyBlock(nBase, W.buildBlock({}, "1", { nonce: "N0NCE005" })), "N0NCE005", "");
+    const n2 = W.armCsp(W.applyBlock(n1, W.buildBlock({}, "2", { nonce: "N0NCE006" })), "N0NCE006", "N0NCE005");
+    assert.strictEqual(W.stripBlock(n2), nBase, "повторное внедрение и снятие без script-src в исходной CSP");
     const e = W.armCsp(withCsp("style-src 'self'"), "N0NCE004", "");
     assert.ok(!/script-src/.test(e), "без default-src и script-src скрипты не ограничены — директиву не придумываем");
+});
+
+test("адреса файлов хранилища: «#», «%», пробел и кириллица в пути кодируются", () => {
+    const { fileUrl } = require(path.join(EXT, "lib", "storage"));
+    const file = path.join(TMP, "Имя #1 100%", "mooncore-state.json");
+    const u = fileUrl(file);
+    assert.ok(u.indexOf("file:///") === 0 && !/[# ]/.test(u.slice(8)) && u.includes("%23") && u.includes("%25"), u);
+    assert.strictEqual(require("url").fileURLToPath(u), path.resolve(file));
 });
 
 test("план записи: ошибка посреди плана откатывает уже записанное", () => withVscode(() => {

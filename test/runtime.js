@@ -333,6 +333,10 @@ test("эффекты: свечение — стилем, след — холст
 
 // Ленивая загрузка интерфейса — отдельным файлом (ленивая сборка: ядро + чанк).
 require("./runtime/lazy.test")(test, { makeWindow, baseBoot, tick, P });
+// Старт окна: этапы, бюджет времени; повтор горячей перезагрузки.
+require("./runtime/startup.test")(test, { makeWindow, baseBoot, tick });
+// VS Code для модулей: события, команды, ленивые модули, окна, шина.
+require("./runtime/modules2.test")(test, { makeWindow, baseBoot, tick });
 
 (async () => {
     for (const t of queue) {

@@ -4,11 +4,15 @@
 
 const path = require("path");
 const fs = require("fs");
+const url = require("url");
 
-/** file:///-URL: прямые слэши, на Windows — третий слэш перед буквой диска. */
+/**
+ * file:///-URL: прямые слэши, на Windows — третий слэш перед буквой диска. Спецсимволы пути
+ * кодируются (pathToFileURL): «#», «?» и «%» в имени папки пользователя иначе ломали адрес —
+ * окно не находило состояние, мост и конструктор.
+ */
 function fileUrl(p) {
-    const abs = path.resolve(p).replace(/\\/g, "/");
-    return "file:///" + abs.replace(/^\/+/, "");
+    return url.pathToFileURL(path.resolve(p)).href;
 }
 
 function storageDir(context) {

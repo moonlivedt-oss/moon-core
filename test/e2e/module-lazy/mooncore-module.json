@@ -1,0 +1,9 @@
+{
+  "id": "e2e-lazy",
+  "name": "E2E-ленивый",
+  "version": "1.0.0",
+  "script": "runtime.js",
+  "lazy": true,
+  "capabilities": ["editor.read", "decorations"],
+  "commands": [{ "id": "ping", "title": "E2E: ping", "langs": ["javascript"], "context": true }]
+}

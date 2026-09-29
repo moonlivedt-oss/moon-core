@@ -22,6 +22,7 @@ const CACHE = path.join(ROOT, ".vscode-test");
 const EXT = path.join(ROOT, "extension");
 const SUITE = path.join(__dirname, "suite.js");
 const MODULE = path.join(__dirname, "module");
+const MODULE_LAZY = path.join(__dirname, "module-lazy");
 const WORKSPACE = path.join(__dirname, "workspace");
 const PHASES = ["inject", "window", "remove"];
 const PHASE_TIMEOUT_MS = 180000;
@@ -97,8 +98,10 @@ function writeSettings(userData) {
     const dir = path.join(userData, "User");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, "settings.json"), JSON.stringify({
-        "moonCore.modules": [MODULE],
+        "moonCore.modules": [MODULE, MODULE_LAZY],
         "moonCore.autoReinject": false,
+        // Фазы внедряют сами через _test: самовнедрение при первом запуске им только мешает.
+        "moonCore.autoInject": false,
         // Глубокая интеграция: крючок сервисов окна в бандле и главный процесс (вид окна).
         "moonCore.deepHooks": true,
         "moonCore.mainProcess": true,

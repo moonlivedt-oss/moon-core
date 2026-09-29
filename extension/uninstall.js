@@ -49,9 +49,11 @@ function main() {
         // Оболочка и окно сессий; вместе с блоком уходят файлы модулей рядом и возвращается
         // исходный хэш оболочки в product.json (из бэкапа, который сделал Moon Core).
         findWorkbenchIn(dir, 6, true).forEach((f) => {
-            try { if (unpatchFile(f)) done++; } catch (e) { console.log("moon-core: нет прав на " + f + " (" + e.code + ")"); }
+            let clean = true;
+            try { if (unpatchFile(f)) done++; } catch (e) { clean = false; console.log("moon-core: нет прав на " + f + " (" + e.code + ")"); }
             try { fs.unlinkSync(f + TMP_EXT); } catch (e) { /* хвоста нет */ }
-            try { restoreChecksum(path.dirname(dir), checksumKey(dir, f)); } catch (e) { /* бэкапа нет — хэш не трогали */ }
+            // Исходный хэш — только если блок действительно снят: иначе он не сойдётся с оболочкой.
+            if (clean) { try { restoreChecksum(path.dirname(dir), checksumKey(dir, f)); } catch (e) { /* бэкапа нет — хэш не трогали */ } }
         });
         unpatchDeep(dir);
     });

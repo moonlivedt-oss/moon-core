@@ -11,8 +11,10 @@ const P = require("./protocol");
 const S = require("./snippets");
 const W = require("./wb-patch");
 const { metaFile } = require("./storage");
+const KEYS = require("./keys");
+const AU = require("./audit");
 
-const JS_OK_KEY = "mooncore.snippets.approvedJs"; // id -> sha256 одобренного кода JS-сниппета
+const JS_OK_KEY = KEYS.JS_APPROVED; // id -> sha256 одобренного кода JS-сниппета
 
 class SnippetsPart {
     // ---------------- одобрение JS-сниппетов ----------------
@@ -29,9 +31,11 @@ class SnippetsPart {
     /** Сниппеты, которые можно запускать: CSS — всегда, JS — только одобренный код. */
     runnable(list) {
         let ok = this.approvedJs();
-        if (!ok) {                                   // первый запуск этой версии: всё, что уже есть, — одобрено
+        if (!ok) {
+            // Первый запуск: одобренного нет. Раньше всё, что уже лежало в папке, одобрялось молча —
+            // и JS, подложенный до установки (или после сброса хранилища), запускался без вопроса.
+            // Теперь чистая карта: сниппеты, созданные в VS Code, одобряются при создании и сохранении.
             ok = {};
-            list.filter((s) => s.kind === "js" && !s.error).forEach((s) => { ok[s.id] = W.sha256(s.code); });
             this.context.globalState.update(JS_OK_KEY, ok);
         }
         this.jsPending = list.filter((s) => s.kind === "js" && !s.error && s.enabled && ok[s.id] !== W.sha256(s.code));
@@ -47,9 +51,10 @@ class SnippetsPart {
                 if (this.jsAsked && this.jsAsked.has(key)) continue;
                 (this.jsAsked = this.jsAsked || new Set()).add(key);
                 const pick = await vscode.window.showWarningMessage(
-                    "Moon Core: JS-сниппет «" + s.id + "» изменён не из VS Code (другой программой или синхронизацией). " +
-                    "Он выполняется в окне VS Code с полным доступом. Запустить новый код?",
+                    "Moon Core: JS-сниппет «" + s.id + "» не одобрен: его изменили не из VS Code (другая программа, синхронизация) " +
+                    "или он появился до установки. Он выполняется в окне VS Code с полным доступом. Запустить этот код?",
                     "Открыть и проверить", "Запустить", "Не запускать");
+                if (pick === "Запустить" || pick === "Не запускать") AU.record(this.context.globalState, "js", s.id, pick === "Запустить" ? "allow" : "deny").catch(() => {});
                 if (pick === "Запустить") { await this.approveJs(s.id, s.code); this.rebuild(); }
                 else if (pick === "Открыть и проверить") await this.open(s.id);
             }
@@ -63,7 +68,10 @@ class SnippetsPart {
     snippetIdOf(doc) {
         if (!doc || doc.uri.scheme !== "file") return "";
         const f = doc.uri.fsPath;
-        if (path.dirname(f).toLowerCase() !== this.dir.toLowerCase()) return "";
+        // Регистр пути не важен только там, где его не различает файловая система.
+        const same = process.platform === "win32" || process.platform === "darwin"
+            ? path.dirname(f).toLowerCase() === this.dir.toLowerCase() : path.dirname(f) === this.dir;
+        if (!same) return "";
         const id = path.basename(f);
         return S.validId(id) ? id : "";
     }

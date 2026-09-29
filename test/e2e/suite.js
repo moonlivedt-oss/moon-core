@@ -15,6 +15,7 @@ const path = require("path");
 const PHASE = process.env.MOONCORE_E2E_PHASE || "";
 const OUT = process.env.MOONCORE_E2E_OUT || "";
 const MOD = "e2e-probe";
+const LAZY = "e2e-lazy";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function waitFor(fn, ms, every) {
@@ -48,7 +49,10 @@ exports.run = async function () {
         // лечь на диск, когда VS Code закрывается сразу после прогона.
         const m = moduleHost.discover().find((x) => x.id === MOD);
         if (!step("модуль-зонд найден по настройке moonCore.modules", !!m)) return;
-        await context.globalState.update("mooncore.modules.allowed", { [m.id]: m.source });
+        const lz = moduleHost.discover().find((x) => x.id === LAZY);
+        step("ленивый модуль-зонд найден, права и команда из манифеста", !!lz && lz.lazy && lz.caps.length === 2 && lz.commands.length === 1, lz && { lazy: lz.lazy, caps: lz.caps });
+        await context.globalState.update("mooncore.modules.allowed", Object.assign({ [m.id]: m.source }, lz ? { [lz.id]: lz.source } : {}));
+        if (lz) await moduleHost.approveCaps(context, lz, lz.caps);
         host.modules.setModules(moduleHost.allowed(context));
 
         if (PHASE === "inject") {
@@ -59,6 +63,10 @@ exports.run = async function () {
             step("модуль в блоке", st.every((s) => (s.modules || []).indexOf(MOD) !== -1));
             step("хэш в product.json пересчитан (нет «повреждена»)", st.every((s) => s.checksum === true), st.map((s) => s.checksum));
             step("файл модуля рядом с оболочкой", st.every((s) => fs.existsSync(path.join(path.dirname(s.file), "mooncore-mod-" + MOD + ".js"))));
+            step("ленивый модуль: файл есть, а <script> на старте нет", st.every((s) => {
+                const html = fs.readFileSync(s.file, "utf8");
+                return fs.existsSync(path.join(path.dirname(s.file), "mooncore-mod-" + LAZY + ".js")) && html.indexOf('src="mooncore-mod-' + LAZY + '.js"') === -1 && (s.modules || []).indexOf(LAZY) !== -1;
+            }));
             step("бэкап чистой оболочки", st.every((s) => fs.existsSync(s.file + ".mooncore-backup")));
             step("интерфейс окна — отдельным файлом в хранилище", inject.lazyUi(context) && fs.existsSync(path.join(context.globalStorageUri.fsPath, inject.uiChunk(context).name)));
             // Глубокая интеграция.
@@ -109,6 +117,31 @@ exports.run = async function () {
             step("контекст окна: язык sample.js", !!p2 && p2.probe.lang === "javascript", p2 && p2.probe.lang);
             step("шлюз: элемент статусбара VS Code от модуля", !!p2 && p2.native === true && !!(host.nativeItems && host.nativeItems.has(MOD + "/probe")));
             step("сервисы окна: модуль получил statusbarService", !!p2 && p2.probe.svc === true, p2 && { svc: p2.probe.svc, names: p2.probe.svcCount });
+            // Ленивый модуль: команда из палитры/меню грузит его файл (script src + integrity) и доходит до него.
+            step("ленивый модуль до команды не загружен", !host.modules.readData(LAZY));
+            const ed = vscode.window.activeTextEditor;
+            if (ed) ed.selection = new vscode.Selection(1, 2, 1, 2);   // на слове «function»
+            await host.invokeModuleCommand(LAZY, "ping");
+            const lzd = await waitFor(() => { const d = host.modules.readData(LAZY); return d && d.ping && d.decorate !== undefined ? d : null; }, 20000, 300);
+            let lzInfo = lzd;
+            if (!lzd) {
+                host.modules.api(MOD).publish("probeState", { id: 5, mod: LAZY, load: true });
+                lzInfo = await waitFor(() => { const d = host.modules.readData(MOD); return d && d.modState && d.modState.id === 5 ? d.modState : null; }, 15000, 300);
+                lzInfo = { probe: lzInfo, after: host.modules.readData(LAZY), bridge: host.bridge.status() };
+            }
+            step("ленивый модуль загрузился по команде и получил слово под курсором", !!lzd && !!lzd.ping.word && lzd.ping.lang === "javascript" && lzd.symbol === lzd.ping.word, lzInfo);
+            step("подсветка кода от модуля (право decorations)", !!lzd && lzd.decorate === true);
+            const ev = await waitFor(() => { const d = host.modules.readData(LAZY); return d && d.editor && d.editor.lang ? d.editor : null; }, 15000, 300);
+            step("события VS Code: модуль знает активный файл", !!ev && ev.lang === "javascript" && ev.file === "sample.js" && !!ev.path, ev);
+            step("команды модулей: ключ контекста для меню", (host.moduleCommands() || []).some((c) => c.mod === LAZY && c.id === "ping"));
+            // Выключение без перезагрузки: хост сообщает новый список, окно убирает модуль.
+            host.modules.setModules(moduleHost.allowed(context).filter((x) => x.id !== LAZY));
+            host.broadcastModuleSet();
+            host.modules.api(MOD).publish("probeState", { id: 4, mod: LAZY });
+            const ps = await waitFor(() => { const d = host.modules.readData(MOD); return d && d.modState && d.modState.id === 4 ? d.modState : null; }, 15000, 300);
+            step("модуль выключен в окне без перезагрузки", !!ps && ps.state && ps.state.off === true, ps);
+            host.modules.setModules(moduleHost.allowed(context));
+            host.broadcastModuleSet();
             // Ленивый интерфейс: окно грузит конструктор при первом открытии (чанк из хранилища, прямой eval).
             host.modules.api(MOD).publish("probeUi", { id: 3 });
             const pu = await waitFor(() => { const d = host.modules.readData(MOD); return d && d.ui && d.ui.id === 3 && d.ui.after ? d.ui : null; }, 15000, 300);

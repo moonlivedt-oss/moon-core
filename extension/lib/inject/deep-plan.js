@@ -45,6 +45,14 @@ function deepState() {
     return deepCache.v;
 }
 
+/** Бэкапа нет или он от прошлой сборки VS Code (не совпадает с нынешним файлом без наших правок). */
+function bakStale(file, bare) {
+    try {
+        const b = file + W.BAK_EXT;
+        return fs.statSync(b).size !== Buffer.byteLength(bare, "utf8") || fs.readFileSync(b, "utf8") !== bare;
+    } catch (e) { return true; }
+}
+
 /**
  * Добавить в план глубокие патчи (или их снятие) по настройкам.
  * hooks: { planChecksum(products, file, data), originalChecksum(file), fixChecksum: bool } — из shell.js
@@ -60,7 +68,7 @@ function planDeep(context, ops, products, hooks) {
         let next = bare;
         if (want.di) { const r = DP.patchBundle(bare); if (r.ok) next = r.text; else log("сервисы окна: " + r.error); }
         if (next !== text) {
-            if (!fs.existsSync(f.bundle + W.BAK_EXT)) ops.push({ file: f.bundle + W.BAK_EXT, data: bare });
+            if (bakStale(f.bundle, bare)) ops.push({ file: f.bundle + W.BAK_EXT, data: bare });
             ops.push({ file: f.bundle, data: next, atomic: true });
             // Хэш — только если без нашего крючка бандл исходный: чужие правки не узакониваем.
             const orig = hooks.originalChecksum(f.bundle);
@@ -74,7 +82,7 @@ function planDeep(context, ops, products, hooks) {
         const bare = DP.stripMain(mt);
         const next = want.main ? DP.patchMain(bare) : bare;
         if (next !== mt) {
-            if (!fs.existsSync(f.main + W.BAK_EXT)) ops.push({ file: f.main + W.BAK_EXT, data: bare });
+            if (bakStale(f.main, bare)) ops.push({ file: f.main + W.BAK_EXT, data: bare });
             ops.push({ file: f.main, data: next, atomic: true });
         }
         const script = DP.mainScript(context.extension.id);

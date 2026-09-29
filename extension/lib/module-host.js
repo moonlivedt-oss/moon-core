@@ -12,16 +12,20 @@ const vscode = require("vscode");
 const fs = require("fs");
 const path = require("path");
 const M = require("./modules");
+const MF = require("./module-manifest");
 const { log } = require("./log");
+const KEYS = require("./keys");
+const AU = require("./audit");
 
-const ALLOWED_KEY = "mooncore.modules.allowed";   // id -> source
-const DENIED_KEY = "mooncore.modules.denied";     // id -> source
+const ALLOWED_KEY = KEYS.MODULES_ALLOWED;   // id -> source
+const DENIED_KEY = KEYS.MODULES_DENIED;     // id -> source
 // Одобренный КОД модуля. Разрешение модуля (id + источник) не значит «любой код из этой папки
 // навсегда»: если скрипт на диске изменился, в оболочку идёт последняя одобренная версия (её
 // копия лежит в globalStorage), а новая — только после «Встроить». Для папки, где модуль
 // разрабатывают, можно один раз сказать «доверять обновлениям».
-const CODE_KEY = "mooncore.modules.approvedCode";  // id -> { sha, source }
-const TRUST_KEY = "mooncore.modules.trustUpdates"; // id -> source
+const CODE_KEY = KEYS.MODULES_CODE;  // id -> { sha, source }
+const TRUST_KEY = KEYS.MODULES_TRUST;
+const CAPS_KEY = KEYS.MODULES_CAPS; // id -> source
 
 /**
  * Все найденные модули: из папок настройки moonCore.modules и из расширений
@@ -56,12 +60,88 @@ function allowed(context, found) {
     return (found || discover()).filter((m) => map[m.id] === m.source);
 }
 
+// ------------------------------------------------------------------ права модуля
+/** Одобренные права модуля (из того же источника). */
+function approvedCaps(context, m) {
+    const rec = readMap(context, CAPS_KEY)[m.id];
+    return rec && rec.source === m.source && Array.isArray(rec.caps) ? MF.cleanCaps(rec.caps) : [];
+}
+/** Права, которые модуль может использовать сейчас: объявлены в манифесте И одобрены. */
+function capsOf(context, m) {
+    if (!m) return [];
+    const ok = approvedCaps(context, m);
+    return (m.caps || []).filter((c) => ok.indexOf(c) !== -1);
+}
+async function approveCaps(context, m, caps) {
+    const map = readMap(context, CAPS_KEY);
+    const cur = approvedCaps(context, m);
+    map[m.id] = { source: m.source, caps: MF.cleanCaps(cur.concat(caps || [])) };
+    await context.globalState.update(CAPS_KEY, map);
+}
+
+/**
+ * Разрешённые модули, которые просят права сверх одобренных (новый модуль с правами или
+ * обновление добавило права): спросить. Свои модули (isOwn) получают объявленное без вопроса.
+ */
+async function reviewCaps(context, list) {
+    let changed = false;
+    for (const m of list || []) {
+        if (!isAllowed(context, m)) continue;
+        const rec = readMap(context, CAPS_KEY)[m.id];
+        const declined = rec && rec.source === m.source && Array.isArray(rec.declined) ? rec.declined : [];
+        const want = MF.newCaps(m.caps, approvedCaps(context, m)).filter((c) => declined.indexOf(c) === -1);
+        if (!want.length) continue;
+        if (isOwn(context, m)) { await approveCaps(context, m, want); changed = true; continue; }
+        const pick = await vscode.window.showWarningMessage(
+            "Moon Core: модуль «" + m.name + "» (" + sourceTitle(m) + ") просит права: " + MF.capsText(want) + ". Дать?",
+            "Дать", "Не давать");
+        if (!pick) continue;
+        AU.record(context.globalState, "caps", m.id + ": " + want.join(", "), pick === "Дать" ? "allow" : "deny").catch(() => {});
+        if (pick === "Дать") { await approveCaps(context, m, want); changed = true; }
+        else {
+            // «Не давать» запоминается: пустая добавка, но вопрос о тех же правах не повторится,
+            // пока их список в манифесте не изменится.
+            const map = readMap(context, CAPS_KEY);
+            map[m.id] = { source: m.source, caps: approvedCaps(context, m), declined: want };
+            await context.globalState.update(CAPS_KEY, map);
+        }
+    }
+    return changed;
+}
+
 async function setAllowed(context, m, on) {
     const a = readMap(context, ALLOWED_KEY), d = readMap(context, DENIED_KEY);
     if (on) { a[m.id] = m.source; delete d[m.id]; }
     else { delete a[m.id]; d[m.id] = m.source; }
     await context.globalState.update(ALLOWED_KEY, a);
     await context.globalState.update(DENIED_KEY, d);
+}
+
+/**
+ * Модуль из расширения того же издателя, что и Moon Core (moonlivedt.*): это части одного
+ * набора — фон, окно документации. Они и так ставятся как расширения с полным доступом к
+ * редактору, поэтому вопрос «разрешить?» ничего не защищает, а человеку только мешает.
+ * Модули из папок и чужих расширений — по-прежнему только с согласия.
+ */
+function isOwn(context, m) {
+    const pub = String((context.extension && context.extension.packageJSON && context.extension.packageJSON.publisher) || "moonlivedt").toLowerCase();
+    return !!m && typeof m.source === "string" && m.source.toLowerCase().indexOf("ext:" + pub + ".") === 0;
+}
+
+/** Разрешить свои модули (isOwn) без вопроса — кроме тех, что человек сам запретил. true — что-то разрешили. */
+async function autoAllowOwn(context, found) {
+    const denied = readMap(context, DENIED_KEY);
+    let changed = false;
+    for (const m of found || discover()) {
+        // Свои модули получают объявленные права сразу (и после обновления тоже).
+        if (isOwn(context, m) && isAllowed(context, m) && MF.newCaps(m.caps, approvedCaps(context, m)).length) await approveCaps(context, m, m.caps);
+        if (!isOwn(context, m) || isAllowed(context, m) || denied[m.id] === m.source) continue;
+        await setAllowed(context, m, true);
+        if (m.caps && m.caps.length) await approveCaps(context, m, m.caps);
+        log("модуль " + m.id + " (" + m.source + "): разрешён сам — расширение того же издателя");
+        changed = true;
+    }
+    return changed;
 }
 
 function sourceTitle(m) {
@@ -72,19 +152,24 @@ function sourceTitle(m) {
 
 /** Спросить про новые модули (ни разрешённые, ни запрещённые из этого источника). true — если что-то разрешили. */
 async function reviewNew(context, found) {
+    const list = found || discover();
+    let changed = await autoAllowOwn(context, list);
     const denied = readMap(context, DENIED_KEY);
-    let changed = false;
-    for (const m of found || discover()) {
+    for (const m of list) {
         if (isAllowed(context, m) || denied[m.id] === m.source) continue;
         const pick = await vscode.window.showInformationMessage(
             "Moon Core: модуль «" + m.name + "» (" + sourceTitle(m) + ") хочет встроиться в оболочку VS Code. " +
-            "Он получит такой же доступ к интерфейсу, как сам Moon Core. Разрешить?",
+            "Он получит такой же доступ к интерфейсу, как сам Moon Core" + (m.caps && m.caps.length ? ", и права: " + MF.capsText(m.caps) : "") + ". Разрешить?",
             "Разрешить", "Запретить");
         if (!pick) continue;                       // закрыли уведомление — спросим в следующий раз
         await setAllowed(context, m, pick === "Разрешить");
+        if (pick === "Разрешить" && m.caps && m.caps.length) await approveCaps(context, m, m.caps);
+        AU.record(context.globalState, "module", m.id + " (" + sourceTitle(m) + ")", pick === "Разрешить" ? "allow" : "deny").catch(() => {});
         log("модуль " + m.id + " (" + m.source + "): " + (pick === "Разрешить" ? "разрешён" : "запрещён"));
         if (pick === "Разрешить") changed = true;
     }
+    // Уже разрешённые модули, которым обновление добавило права.
+    if (await reviewCaps(context, list)) changed = true;
     return changed;
 }
 
@@ -253,7 +338,8 @@ function vetScripts(context, list, scripts) {
             saveApproved(context, m, s.code); out.push(s); return;
         }
         if (a.sha === s.sha) { out.push(s); return; }
-        if (isTrusted(context, m) || isDev(m)) { saveApproved(context, m, s.code); out.push(s); return; }
+        // Своё расширение обновилось — новый код пришёл вместе с ним, спрашивать нечего.
+        if (isTrusted(context, m) || isDev(m) || isOwn(context, m)) { saveApproved(context, m, s.code); out.push(s); return; }
         pending.push({ module: m, script: s, oldSha: a.sha });
         let old = null;
         try { old = fs.readFileSync(copyFile(context, s.id), "utf8"); } catch (e) {}
@@ -279,6 +365,7 @@ async function reviewChanged(context, pending) {
                 const t = readMap(context, TRUST_KEY); t[m.id] = m.source; await context.globalState.update(TRUST_KEY, t);
             }
             await saveApproved(context, m, p.script.code);
+            AU.record(context.globalState, "moduleCode", m.id + " (" + sourceTitle(m) + ")", pick === "Встроить" ? "allow" : "always").catch(() => {});
             log("модуль " + m.id + ": новый код одобрен" + (pick === "Встроить" ? "" : " (обновления из этого источника — без вопроса)"));
             changed = true;
         }
@@ -286,4 +373,4 @@ async function reviewChanged(context, pending) {
     return changed;
 }
 
-module.exports = { discover, allowed, reviewNew, pickCommand, sourceTitle, vetScripts, reviewChanged, isDev, devIds, devCode, pickDev, createModule, templateRuntime };
+module.exports = { capsOf, approvedCaps, approveCaps, reviewCaps, discover, allowed, reviewNew, autoAllowOwn, isOwn, pickCommand, sourceTitle, vetScripts, reviewChanged, isDev, devIds, devCode, pickDev, createModule, templateRuntime };

@@ -23,6 +23,9 @@ const LK = require("./lock");
 const UF = require("./ui-file");
 const { storageDir } = require("../storage");
 
+/** Текст файла или null (нет файла). */
+function readOr(file) { try { return fs.readFileSync(file, "utf8"); } catch (e) { return null; } }
+
 /** Файл блокировки записи оболочки (в общем для всех окон globalStorage). null — без блокировки. */
 function lockFileOf(context) { return context ? LK.lockPath(storageDir(context)) : null; }
 
@@ -40,6 +43,7 @@ function planInject(context) {
     }
     const runtime = rt.code;
     const mods = SH.moduleSet(context);
+    const ttNames = SH.moduleTrustedTypeNames(mods);
     const boot = SH.bootData(context, mods, ui);
     const conf = SH.conf();
     const external = conf.get("moduleFiles", true);
@@ -53,19 +57,29 @@ function planInject(context) {
         const dir = path.dirname(f);
         const old = W.blockInfo(html);
         const nonce = W.makeNonce();
+        // Политики Trusted Types модулей, которых нет в чистой оболочке: без них модуль не создаст
+        // свою политику в VS Code с CSP (окно документации C++ не появлялось).
+        const tt = W.moduleTrustedTypes(html, ttNames);
         // Модули — отдельными файлами рядом с оболочкой (или инлайном, если так настроено).
         const list = mods.scripts.map((m) => external
-            ? { id: m.id, code: m.code, file: W.moduleFileName(m.id), integrity: sri ? W.sriHash(W.moduleFileContent(m.id, m.code)) : "" }
-            : m);
+            ? { id: m.id, code: m.code, lazy: !!m.lazy, file: W.moduleFileName(m.id), integrity: sri ? W.sriHash(W.moduleFileContent(m.id, m.code)) : "" }
+            : Object.assign({}, m, { lazy: false }));
+        // Файл и integrity каждого модуля — в boot: по ним рантайм грузит ленивый модуль и снова
+        // включает выключенный без перезагрузки окна. Встроенным инлайном модулям файла нет.
+        boot.modules.forEach((b) => {
+            const m = list.find((x) => x.id === b.id);
+            b.file = m && m.file ? { src: m.file, integrity: m.integrity || "" } : null;
+            if (!(m && m.file)) b.lazy = null;
+        });
         if (external) list.forEach((m) => ops.push({ file: path.join(dir, m.file), data: W.moduleFileContent(m.id, m.code) }));
         W.moduleFilesIn(dir, external ? list.map((m) => m.file) : []).forEach((x) => ops.push({ file: x, remove: true }));
-        const block = W.buildBlock(boot, runtime, { nonce: nonce, version: boot.version, modules: list });
+        const block = W.buildBlock(boot, runtime, { nonce: nonce, version: boot.version, modules: list, trustedTypes: tt });
         let next = W.applyBlock(html, block);
         if (next == null) return { ok: false, reason: "error", error: "в оболочке нет </head>: " + f };
-        next = W.armCsp(next, nonce, old && old.nonce);
-        // Бэкап — один раз и только чистого (без нашего блока) файла.
-        const bak = f + W.BAK_EXT;
-        if (!old && !fs.existsSync(bak)) ops.push({ file: bak, data: html });
+        next = W.armCsp(next, nonce, old && old.nonce, tt, old && old.tt);
+        // Бэкап — только чистого (без нашего блока) файла. После обновления VS Code в старом
+        // бэкапе лежит оболочка прошлой сборки — заменяем её нынешней.
+        if (!old && readOr(f + W.BAK_EXT) !== html) ops.push({ file: f + W.BAK_EXT, data: html });
         if (next !== html) ops.push({ file: f, data: next, atomic: true });
         if (fixSum) {
             if (SH.shellTrust(context, f, next).trusted) SH.planChecksum(products, f, next);
@@ -115,6 +129,17 @@ function execPlan(ops) {
             } else if (op.atomic) W.writeWorkbenchAtomic(op.file, op.data);
             else fs.writeFileSync(op.file, op.data, "utf8");
             done.push({ file: op.file, prev: prev });
+        }
+        // Сверка после записи (как после записи с правами администратора): антивирус или другой
+        // загрузчик мог подменить файл между rename и чтением окном. Не совпало — откат целиком.
+        const bad = ops.filter((op) => {
+            try { return op.remove ? fs.existsSync(op.file) : fs.readFileSync(op.file, "utf8") !== op.data; }
+            catch (e) { return !op.remove; }
+        });
+        if (bad.length) {
+            const err = new Error("после записи не совпали файлы: " + bad.map((o) => path.basename(o.file)).join(", "));
+            err.code = "EVERIFY";
+            throw err;
         }
     } catch (e) {
         rollback(done);

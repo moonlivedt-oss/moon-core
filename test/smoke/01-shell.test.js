@@ -45,8 +45,13 @@ test("патч: CSP — добавляем только свой nonce и сни
     const stripped = W.stripBlock(again);
     assert.ok(!stripped.includes("MINE0002") && stripped.includes("'nonce-OTHER123'"));
     assert.strictEqual(stripped, html, "после снятия CSP — ровно исходный");
-    // Старая версия добавляла «любой порт» — заменяется на порты моста.
-    const legacy = W.armCsp(html.replace("connect-src 'self'", "connect-src 'self' http://127.0.0.1:*"), "MINE0003", "");
+    // Старая версия добавляла «любой порт» — заменяется на порты моста. Но если в оболочке окно
+    // cpp-docs-panel, «любой порт» — адрес его моста: остаётся.
+    const anyPort = html.replace("connect-src 'self'", "connect-src 'self' http://127.0.0.1:*");
+    const withDocs = W.armCsp(anyPort, "MINE0003", "");
+    assert.ok(withDocs.includes("127.0.0.1:*") && withDocs.includes(W.CONNECT_ADD), "мост cpp-docs не отрезан");
+    const noDocs = anyPort.replace(/<!-- CPPDOCS-WINDOW-START -->[\s\S]*?<!-- CPPDOCS-WINDOW-END -->/, "");
+    const legacy = W.armCsp(noDocs, "MINE0003", "");
     assert.ok(!legacy.includes("127.0.0.1:*") && legacy.includes(W.CONNECT_ADD));
 });
 

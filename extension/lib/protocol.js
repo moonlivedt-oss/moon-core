@@ -30,7 +30,9 @@ const PROTOCOL = {
     //   uiClick — клик по кнопке, которую добавило другое расширение { id };
     //   context — контекст окна этого хоста (язык, ветка, проект, тема);
     //   uiFailed — интерфейс окна (конструктор) не загрузился отдельным файлом { reason, sha }.
-    METHODS: ["picked", "report", "command", "log", "design", "module", "moduleData", "focus", "timing", "moduleCode", "pickCommand", "native", "uiClick", "context", "uiFailed"],
+    //   vsSubscribe — модуль подписывается на события VS Code { id, kinds } (подтверждается раз в минуту);
+    //   modCommands — команды модуля для палитры и контекстного меню { id, commands }.
+    METHODS: ["picked", "report", "command", "log", "design", "module", "moduleData", "focus", "timing", "moduleCode", "pickCommand", "native", "uiClick", "context", "uiFailed", "vsSubscribe", "modCommands"],
     // События потока (SSE /events/<токен>).
     //   state   — полный набор сниппетов (приходит и сразу после подключения);
     //   preview — несохранённая правка CSS-сниппета (живой предпросмотр);
@@ -43,7 +45,9 @@ const PROTOCOL = {
     //   profile — применён профиль вида { name, modules }: модули применяют свою часть;
     //   moduleReload — код модуля в режиме разработки изменился { id, sha }: окно перезапускает модуль.
     //   ctx     — контекст окна хоста { lang, branch, folder, theme } для правил «только для...».
-    EVENTS: ["state", "preview", "pick", "check", "reload", "design", "module", "focus", "profile", "moduleReload", "ctx"],
+    //   vs      — событие VS Code { kind, data, full, readers } (full — только модулям из readers);
+    //   moduleSet — разрешённые модули { ids }: окно выключает остальные без перезагрузки.
+    EVENTS: ["state", "preview", "pick", "check", "reload", "design", "module", "focus", "profile", "moduleReload", "ctx", "vs", "moduleSet"],
     MAX_BODY: 1024 * 1024,           // байт в теле запроса
     MAX_SNIPPET: 256 * 1024,         // байт в одном сниппете
     MAX_SNIPPETS: 200,               // сниппетов всего

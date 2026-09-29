@@ -12,6 +12,7 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const TT = require("./trusted-types");
 const { writeAtomic } = require("./fsx");
 
 const WB_START = "<!-- MOONCORE-START -->";
@@ -28,6 +29,7 @@ const { BRIDGE_PORT_FIRST, BRIDGE_PORT_COUNT } = require("./protocol");
 const BRIDGE_PORTS = Array.from({ length: BRIDGE_PORT_COUNT }, (_, i) => BRIDGE_PORT_FIRST + i);
 const CONNECT_ADD = BRIDGE_PORTS.map((p) => " http://127.0.0.1:" + p).join("");
 const CONNECT_OLD = " http://127.0.0.1:*";
+const CPPDOCS_START = "<!-- CPPDOCS-WINDOW-START -->";
 
 /** Экранировать </script, чтобы инлайн-<script> не закрылся на содержимом. */
 function escapeScript(s) { return String(s).replace(/<\/script/gi, "<\\/script").replace(/<!--/g, "<\\!--"); }
@@ -61,11 +63,18 @@ function blockInfo(html) {
     const sha = (b.match(/data-mooncore-sha="([0-9a-f]{64})"/) || [])[1] || "";
     const nonce = (b.match(/nonce="([A-Za-z0-9]{8,64})"/) || [])[1] || "";
     const mods = (b.match(/data-mooncore-modules="([a-z0-9,-]{0,600})"/) || [])[1] || "";
-    return { version: ver, sha: sha, nonce: nonce, modules: mods ? mods.split(",") : [] };
+    const tt = (b.match(/data-mooncore-tt="([a-z0-9,-]{0,600})"/) || [])[1] || "";
+    return { version: ver, sha: sha, nonce: nonce, modules: mods ? mods.split(",") : [], tt: tt ? tt.split(",") : [] };
 }
 
-/** Снять из CSP наши адреса моста (и прежний «любой порт»). */
-function stripConnect(meta) { return meta.split(CONNECT_ADD).join("").split(CONNECT_OLD).join(""); }
+/**
+ * Снять из CSP наши адреса моста (и прежний «любой порт»). Тот же «любой порт» пишет в CSP окно
+ * cpp-docs-panel для своего моста: пока его блок в оболочке, этот адрес — его, не трогаем.
+ */
+function stripConnect(meta, html) {
+    const out = meta.split(CONNECT_ADD).join("");
+    return html && html.indexOf(CPPDOCS_START) !== -1 ? out : out.split(CONNECT_OLD).join("");
+}
 /** Снять из CSP только наш nonce (остальные — чужие, их не трогаем). */
 function stripOurNonce(meta, nonce) {
     if (!nonce) return meta;
@@ -85,41 +94,26 @@ function addNonce(meta, directive, nonce) {
     return meta.replace(re, () => m[1] + m[2] + m[3] + " 'nonce-" + nonce + "'");
 }
 
-// Политика Trusted Types Moon Core. VS Code требует доверенные типы для кода из строки
-// (require-trusted-types-for 'script') и разрешает политики только из списка trusted-types.
-// Окно создаёт политику «mooncore» при старте и пропускает через неё только чанк интерфейса,
-// сверенный по SHA-256 (runtime/src/65-ui-loader.js).
-const TT_POLICY = "mooncore";
-const TT_HAS_RE = new RegExp("\\s" + TT_POLICY + "(?=\\s|$)");
-const TT_TOKEN_RE = new RegExp("\\s" + TT_POLICY + "(?=\\s|$)", "g");
-
 /**
  * Директива CSP целиком по имени: m[1] — разделитель перед ней, m[2] — имя, m[3] — значение.
  * Имя стоит отдельно: «trusted-types» не находится внутри «require-trusted-types-for», а
  * «script-src» — внутри «script-src-elem».
  */
 function directiveRe(name) { return new RegExp("(^|[;\"'\\s])(" + name + ")(?=[\\s;\"]|$)([^;>\"]*)", "i"); }
-const TT_RE = directiveRe("trusted-types");
-
-/** Добавить нашу политику в trusted-types (если директива есть и не 'none'). */
-function addTrustedType(meta) {
-    const m = TT_RE.exec(meta);
-    if (!m || /'none'/i.test(m[3]) || TT_HAS_RE.test(m[3])) return meta;
-    const lead = m[3].replace(/\s+$/, ""), tail = m[3].slice(lead.length);
-    return meta.replace(TT_RE, () => m[1] + m[2] + lead + " " + TT_POLICY + tail);
-}
-/** Снять нашу политику из trusted-types (чужие имена не трогаем). */
-function stripTrustedType(meta) {
-    const m = TT_RE.exec(meta);
-    if (!m) return meta;
-    return meta.replace(TT_RE, () => m[1] + m[2] + m[3].replace(TT_TOKEN_RE, ""));
-}
+// Trusted Types (политика «mooncore» и политики модулей) — в lib/trusted-types.js.
+const TT_POLICY = TT.TT_POLICY;
+const addTrustedType = TT.add, stripTrustedType = TT.strip, trustedTypesOf = TT.namesOf;
+/** Политики модулей, которые нужно дописать в CSP этой оболочки (сравнение с чистой, без блока). */
+function moduleTrustedTypes(html, names) { const m = stripBlock(html).match(CSP_RE); return TT.toAdd(m && m[0], names); }
+/** Политики модулей, которых сейчас нет в CSP оболочки. */
+function missingTrustedTypes(html, names) { const m = String(html).match(CSP_RE); return TT.missing(m && m[0], names); }
 
 /** Впустить наш скрипт по nonce, не снимая CSP. Нет CSP-меты — ничего не навязываем. */
-function armCsp(html, nonce, oldNonce) {
+function armCsp(html, nonce, oldNonce, tt, oldTt) {
     const m = html.match(CSP_RE);
     if (!m) return html;
-    let meta = addTrustedType(stripOurNonce(stripOurNonce(m[0], oldNonce), nonce));
+    // Политики модулей: прошлые добавки снимаем (модуль могли убрать), нынешние дописываем.
+    let meta = addTrustedType(stripTrustedType(stripOurNonce(stripOurNonce(m[0], oldNonce), nonce), oldTt), tt);
     const withScript = addNonce(meta, "script-src", nonce);
     if (withScript != null) meta = withScript;
     else {
@@ -135,7 +129,7 @@ function armCsp(html, nonce, oldNonce) {
         }
     }
     meta = addNonce(meta, "style-src", nonce) || meta;
-    meta = stripConnect(meta);
+    meta = stripConnect(meta, html);
     const cm = directiveRe("connect-src").exec(meta);
     if (cm) meta = meta.replace(directiveRe("connect-src"), () => cm[1] + cm[2] + cm[3] + CONNECT_ADD);
     return html.replace(CSP_RE, () => meta);
@@ -148,7 +142,7 @@ function armCsp(html, nonce, oldNonce) {
 function blockSha(runtime, modules) {
     const list = Array.isArray(modules) ? modules : [];
     if (!list.length) return sha256(runtime);
-    return sha256(sha256(runtime) + "|" + list.map((m) => m.id + ":" + sha256(m.code)).join(","));
+    return sha256(sha256(runtime) + "|" + list.map((m) => m.id + (m.lazy ? "~lazy" : "") + ":" + sha256(m.code)).join(","));
 }
 
 const modId = (id) => String(id).replace(/[^a-z0-9-]/g, "");
@@ -181,11 +175,14 @@ function buildBlock(boot, runtime, opts) {
     const attr = nonce ? ' nonce="' + nonce + '"' : "";
     const meta = ' data-mooncore-version="' + String(o.version || "0").replace(/[^\w.+-]/g, "") + '"' +
         ' data-mooncore-sha="' + blockSha(runtime, mods) + '"' +
-        (mods.length ? ' data-mooncore-modules="' + mods.map((m) => modId(m.id)).join(",") + '"' : "");
+        (mods.length ? ' data-mooncore-modules="' + mods.map((m) => modId(m.id)).join(",") + '"' : "") +
+        // Политики Trusted Types модулей, которые МЫ дописали в CSP: при снятии уберём ровно их.
+        (Array.isArray(o.trustedTypes) && o.trustedTypes.length ? ' data-mooncore-tt="' + o.trustedTypes.map(modId).join(",") + '"' : "");
     return WB_START + "\n" +
         "<script" + attr + meta + ">window.__MOONCORE_BOOT__ = " + safeJson(boot) + ";</script>\n" +
         "<script" + attr + ">\n" + escapeScript(runtime) + "\n</script>\n" +
-        mods.map((m) => modMark(attr, "_modStart", m.id) +
+        // Ленивый модуль с файлом рядом не грузится на старте: рантайм подключит файл сам (boot.modules[].lazy).
+        mods.filter((m) => !(m.lazy && m.file)).map((m) => modMark(attr, "_modStart", m.id) +
             (m.file
                 ? "<script" + attr + ' src="' + m.file + '"' + (m.integrity ? ' integrity="' + m.integrity + '"' : "") + ' data-mooncore-module="' + modId(m.id) + '"></script>\n'
                 : "<script" + attr + ' data-mooncore-module="' + modId(m.id) + '">\n' + escapeScript(m.code) + "\n</script>\n") +
@@ -201,13 +198,26 @@ function applyBlock(html, block) {
     return html.slice(0, idx) + block + html.slice(idx);
 }
 
+/**
+ * Снять script-src, которую дописал armCsp (в CSP не было script-src — мы вставили в начало
+ * копию default-src). Узнаём её по месту и содержимому: первая директива, значение ровно как у
+ * default-src. Без этого после снятия оболочка отличалась бы от исходной (хэш, «повреждено»).
+ */
+function stripAddedScriptSrc(meta) {
+    const re = /(content\s*=\s*)(["'])script-src([^;"]*);\s*/i;
+    const m = re.exec(meta);
+    const dm = directiveRe("default-src").exec(meta);
+    if (!m || !dm || m[3].trim() !== dm[3].trim()) return meta;
+    return meta.replace(re, (x, a, q) => a + q);
+}
+
 /** Убрать наш блок и наш nonce из CSP. */
 function stripBlock(html) {
     const info = blockInfo(html);
     let out = html.replace(blockRe(), "");
     if (info && info.nonce) {
         const m = out.match(CSP_RE);
-        if (m) out = out.replace(CSP_RE, () => stripTrustedType(stripConnect(stripOurNonce(m[0], info.nonce))));
+        if (m) out = out.replace(CSP_RE, () => stripAddedScriptSrc(stripTrustedType(stripConnect(stripOurNonce(m[0], info.nonce), out), info.tt)));
     }
     return out;
 }
@@ -347,7 +357,7 @@ module.exports = {
     WB_START, WB_END, TMP_EXT, BAK_EXT, escapeScript, safeJson, makeNonce, sha256, blockSha, findBlock, isInjected, blockInfo,
     armCsp, buildBlock, applyBlock, stripBlock, writeWorkbenchAtomic, findWorkbenchIn, isRealWorkbench, isSessionsShell, unpatchFile,
     MOD_FILE_PREFIX, moduleFileName, moduleFileContent, moduleFilesIn, removeModuleFiles, sriHash, foreignBlocks,
-    BRIDGE_PORTS, CONNECT_ADD, TT_POLICY, addTrustedType, stripTrustedType,
+    BRIDGE_PORTS, CONNECT_ADD, TT_POLICY, addTrustedType, stripTrustedType, trustedTypesOf, moduleTrustedTypes, missingTrustedTypes,
     PRODUCT, productChecksum, checksumKey, setChecksumText, checksumMatches, productBackup, restoreChecksum,
     hasLegacyLeftovers, stripLegacyLeftovers,
 };

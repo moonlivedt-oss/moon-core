@@ -145,11 +145,34 @@ function cleanColorValues(c) {
 }
 
 /** Селектор, безопасный для вставки в CSS: без фигурных скобок, ;, комментариев и переводов строк. */
+// Имена свойств самого объекта: правила лежат в обычном {}, и rules["constructor"] вернул бы
+// функцию Object (правка падала), а rules["__proto__"] = ... подменил бы прототип всех правил.
+const PROTO_KEYS = ["__proto__", "constructor", "prototype", "hasOwnProperty", "toString", "valueOf"];
+function protoKey(k) { return PROTO_KEYS.indexOf(String(k)) !== -1; }
+
 function cleanSelector(sel) {
     const s = String(sel == null ? "" : sel).trim();
-    if (!s || s.length > SELECTOR_MAX) return "";
+    if (!s || s.length > SELECTOR_MAX || protoKey(s)) return "";
     if (/[{};<\\\n\r]|\/\*|\*\/|@/.test(s.replace(/\\[0-9a-fA-F.:#\[\]()"' -]/g, ""))) return "";
-    return s;
+    return balanced(s) ? s : "";
+}
+
+/**
+ * Скобки [ ] ( ) и кавычки закрыты. Незакрытая «(» в селекторе проглатывает в CSS всё до конца
+ * стиля — одно такое правило молча выключило бы все правила после него.
+ */
+function balanced(s) {
+    const stack = [];
+    let quote = "";
+    for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        if (ch === "\\") { i++; continue; }
+        if (quote) { if (ch === quote) quote = ""; continue; }
+        if (ch === "\"" || ch === "'") quote = ch;
+        else if (ch === "[" || ch === "(") stack.push(ch === "[" ? "]" : ")");
+        else if (ch === "]" || ch === ")") { if (stack.pop() !== ch) return false; }
+    }
+    return !quote && !stack.length;
 }
 
 const FP_TAG_RE = /^[a-z][a-z0-9-]{0,30}$/;
@@ -191,7 +214,7 @@ function cleanValue(prop, value) {
     }
     if (p.type === "enum") return p.options.indexOf(String(value)) !== -1 ? String(value) : undefined;
     if (p.type === "color") return typeof value === "string" && COLOR_RE.test(value) ? value.toLowerCase() : undefined;
-    if (p.type === "text") return typeof value === "string" && FONT_RE.test(value.trim()) ? value.trim() : undefined;
+    if (p.type === "text") return typeof value === "string" && FONT_RE.test(value.trim()) && balanced(value.trim()) ? value.trim() : undefined;
     return undefined;
 }
 
@@ -202,7 +225,9 @@ function readDesign(file) {
     if (o && o.rules && typeof o.rules === "object") {
         Object.keys(o.rules).slice(0, MAX_RULES).forEach((sel) => {
             const s = cleanSelector(sel), r = o.rules[sel];
-            if (!s || !r || typeof r.props !== "object") return;
+            // props: null (файл правили руками или он недописан) раньше ронял Object.keys — а с ним
+            // и весь хост при загрузке правок.
+            if (!s || !r || !r.props || typeof r.props !== "object" || Array.isArray(r.props)) return;
             const props = {};
             Object.keys(r.props).forEach((k) => { const v = cleanValue(k, r.props[k]); if (v !== undefined) props[k] = v; });
             if (!Object.keys(props).length) return;
@@ -332,4 +357,4 @@ function propsSpec() { return JSON.parse(JSON.stringify(PROPS)); }
 
 module.exports = {
     FX_SPEC, TOKEN_GROUPS, BUTTON_ZONES, COLOR_CONF, cleanColorKey, cleanColor, colorTarget, cleanButton, cleanButtons, cleanFx, cleanFxValue, cleanColorValues,
-    PROPS, emptyDesign, cleanSelector, cleanValue, cleanFp, readDesign, writeDesign, applyCssOps, renameRule, recordSetting, buildCss, propsSpec };
+    PROPS, emptyDesign, cleanSelector, balanced, protoKey, cleanValue, cleanFp, readDesign, writeDesign, applyCssOps, renameRule, recordSetting, buildCss, propsSpec };

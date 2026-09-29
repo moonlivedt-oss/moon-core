@@ -19,17 +19,18 @@ const { statKey } = require("../fsx");
 const { fileUrl, bridgeFile, stateFile, modulesDataDir } = require("../storage");
 const { deepState } = require("./deep-plan");
 const UF = require("./ui-file");
+const KEYS = require("../keys");
 
 // globalState: доверие к оболочке и отпечаток своего блока.
 // Хэш в product.json — единственный встроенный в VS Code сигнал «файлы редактора изменены».
 // Пересчитывать его можно, только если в оболочке нет ничего, кроме Moon Core (без нашего
 // блока файл совпадает с исходным хэшем), или если чужие вставки ты сам одобрил (их sha
 // запоминается; изменились — спросим снова). Иначе баннер остаётся: он предупреждает.
-const SHELL_OK_KEY = "mooncore.shellTrusted";   // файл оболочки -> sha256 оболочки без нашего блока
-const SHELL_ASKED_KEY = "mooncore.shellAsked";  // файл -> sha, про который уже спрашивали
-const BLOCK_KEY = "mooncore.blockWritten";      // файл -> sha256 блока, который записал Moon Core
-const WANT_KEY = "mooncore.wantInjected";       // пользователь хочет, чтобы Moon Core был в оболочке
-const SRI_OFF_KEY = "mooncore.sriUnsupportedFor"; // версия VS Code, где integrity для модулей не работает
+const SHELL_OK_KEY = KEYS.SHELL_TRUSTED;   // файл оболочки -> sha256 оболочки без нашего блока
+const SHELL_ASKED_KEY = KEYS.SHELL_ASKED;  // файл -> sha, про который уже спрашивали
+const BLOCK_KEY = KEYS.BLOCK_WRITTEN;      // файл -> sha256 блока, который записал Moon Core
+const WANT_KEY = KEYS.WANT_INJECTED;       // пользователь хочет, чтобы Moon Core был в оболочке
+const SRI_OFF_KEY = KEYS.SRI_OFF_FOR; // версия VS Code, где integrity для модулей не работает
 
 function readMap(context, key) {
     const v = context.globalState.get(key);
@@ -66,18 +67,27 @@ let modCache = { key: "", value: null };
 function moduleSet(context) {
     const list = MH.allowed(context);
     const key = list.map((m) => m.id + "|" + m.script + "|" + statKey([m.script])).join("\n") +
-        "|" + JSON.stringify(context.globalState.get("mooncore.modules.approvedCode") || {});
+        "|" + JSON.stringify(context.globalState.get(KEYS.MODULES_CODE) || {});
     if (modCache.value && modCache.key === key) return modCache.value;
     const r = M.loadScripts(list);
     r.errors.forEach((e) => log("модули: " + e));
     // Код каждого модуля — только одобренный (изменённый на диске ждёт подтверждения).
     const v = MH.vetScripts(context, list, r.scripts);
     const ok = new Set(v.scripts.map((s) => s.id));
-    const value = { list: list.filter((m) => ok.has(m.id)), scripts: v.scripts, pending: v.pending };
+    // Ленивость — часть того, как записан блок (без <script> на старте): меняет его отпечаток.
+    const lazy = new Set(list.filter((m) => m.lazy).map((m) => m.id));
+    const scripts = v.scripts.map((s) => (lazy.has(s.id) ? Object.assign({}, s, { lazy: true }) : s));
+    const value = { list: list.filter((m) => ok.has(m.id)), scripts: scripts, pending: v.pending };
     modCache = { key: key, value: value };
     return value;
 }
 function resetModuleCache() { modCache = { key: "", value: null }; }
+/** Политики Trusted Types, которые объявили разрешённые модули (без повторов). */
+function moduleTrustedTypeNames(mods) {
+    const out = [];
+    ((mods && mods.list) || []).forEach((m) => (m.trustedTypes || []).forEach((n) => { if (out.indexOf(n) === -1) out.push(n); }));
+    return out;
+}
 
 /** Данные для окна. ui — { url, sha } файла интерфейса (ленивая загрузка) или null. */
 function bootData(context, mods, ui) {
@@ -182,10 +192,10 @@ async function rememberBlocks(context, ops) {
 // ------------------------------------------------------------------ статус
 let statusCache = new Map();   // файл -> { key, value }
 
-function shellStatus(context, f, sha) {
+function shellStatus(context, f, sha, tt) {
     const prod = productOf(f);
     const trustKey = JSON.stringify([readMap(context, SHELL_OK_KEY)[f] || "", readMap(context, BLOCK_KEY)[f] || ""]);
-    const key = statKey(prod ? [f, prod, prod + W.BAK_EXT] : [f]) + "|" + sha + "|" + trustKey;
+    const key = statKey(prod ? [f, prod, prod + W.BAK_EXT] : [f]) + "|" + sha + "|" + trustKey + "|" + (tt || []).join(",");
     const hit = statusCache.get(f);
     if (hit && hit.key === key) return Object.assign({}, hit.value);
     let html = "";
@@ -194,7 +204,10 @@ function shellStatus(context, f, sha) {
     const tr = shellTrust(context, f, html);
     const written = readMap(context, BLOCK_KEY)[f];
     const value = {
-        file: f, injected: !!info, current: !!info && info.sha === sha, version: info ? info.version : "",
+        // Актуален — тот же рантайм и модули, и CSP впускает политики модулей (их могли снять
+        // снаружи: например, cpp-docs-panel, снимая свою прежнюю вставку, убирает «cppdocs»).
+        file: f, injected: !!info, current: !!info && info.sha === sha && !W.missingTrustedTypes(html, tt).length,
+        version: info ? info.version : "",
         modules: info ? info.modules : [], checksum: checksumState(f, html), legacy: W.hasLegacyLeftovers(html),
         trusted: tr.trusted, foreign: tr.blocks, shellSha: tr.sha,
         // Блок в оболочке — ровно тот, что записал Moon Core? false — его правили снаружи.
@@ -206,13 +219,13 @@ function shellStatus(context, f, sha) {
 
 /** Что сейчас в оболочке: [{file, injected, current, version, checksum, ...}]. current — рантайм совпадает с нашим. */
 function status(context) {
-    let sha = "";
-    try { sha = W.blockSha(UF.runtimeFor(context).code, moduleSet(context).scripts); } catch (e) {}
+    let sha = "", tt = [];
+    try { const mods = moduleSet(context); sha = W.blockSha(UF.runtimeFor(context).code, mods.scripts); tt = moduleTrustedTypeNames(mods); } catch (e) {}
     // Глубокие патчи (сервисы окна, главный процесс) — часть «актуальности»: включил или
     // выключил их в настройках, или VS Code обновился и стёр их — блок устарел.
     const d = deepState();
     return workbenchFiles().map((f) => {
-        const s = shellStatus(context, f, sha);
+        const s = shellStatus(context, f, sha, tt);
         if (!d || !W.isRealWorkbench(s.file)) return s;
         s.deep = d;
         if (s.injected && !d.ok) s.current = false;
@@ -224,7 +237,7 @@ function resetStatusCache() { statusCache = new Map(); }
 module.exports = {
     SHELL_OK_KEY, SHELL_ASKED_KEY, BLOCK_KEY, WANT_KEY, SRI_OFF_KEY,
     readMap, conf, fixChecksumOn, workbenchFiles, allShellFiles, extVersion,
-    moduleSet, resetModuleCache, bootData,
+    moduleSet, resetModuleCache, moduleTrustedTypeNames, bootData,
     appRootOf, checksumState, originalChecksum, planChecksum, planChecksumRestore, productOps,
     shellTrust, rememberBlocks, status, resetStatusCache,
 };

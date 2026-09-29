@@ -13,6 +13,8 @@ const PL = require("./plan");
 const EL = require("./elevated");
 const LK = require("./lock");
 const UF = require("./ui-file");
+const KEYS = require("../keys");
+const AU = require("../audit");
 
 const REASONS = {
     "no-workbench": "Не найден workbench.html в установке VS Code.",
@@ -71,22 +73,67 @@ async function askShellTrust(context, st) {
     const ok = SH.readMap(context, SH.SHELL_OK_KEY);
     todo.forEach((s) => { ok[s.file] = s.shellSha; });
     await context.globalState.update(SH.SHELL_OK_KEY, ok);
+    AU.record(context.globalState, "shell", "чужие вставки: " + names, "allow").catch(() => {});
     log("чужие вставки в оболочке одобрены: " + names);
     return true;
+}
+
+/** Ждать итога задания с полосой прогресса и кнопкой отмены. */
+function waitElevated(job, ms, title) {
+    if (!job) return Promise.resolve({ ok: false, error: "нет задания" });
+    return vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: title, cancellable: true },
+        (p, token) => EL.waitResult(job, ms, () => token.isCancellationRequested));
+}
+/** Windows не дал запросить права сам (PowerShell и Windows Script Host запрещены политикой) —
+ *  показать run.cmd: его можно запустить от имени администратора вручную. */
+async function manualElevation(job, why) {
+    if (!job) return { ok: false, error: "нет задания" };
+    log("права администратора автоматически не запросить" + (why ? " (" + why + ")" : "") + " — предлагаю " + job.cmd);
+    const pick = await vscode.window.showWarningMessage(
+        "Moon Core: Windows не дал запросить права автоматически (запуск PowerShell запрещён на этом ПК). " +
+        "Откроется папка: нажмите на run.cmd правой кнопкой — «Запуск от имени администратора» — и введите пароль администратора.",
+        "Открыть папку", "Отмена");
+    if (pick !== "Открыть папку") { EL.dropJob(job); return { ok: false, cancelled: true }; }
+    try { await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(job.cmd)); } catch (e) {}
+    const r = await waitElevated(job, 10 * 60000, "Moon Core: жду запуска run.cmd от имени администратора…");
+    if (!r.ok) EL.dropJob(job);
+    return r.timeout ? { ok: false, error: "run.cmd так и не запустили" } : r;
+}
+/** Как обойтись без администратора: VS Code «для пользователя». */
+async function explainNoAdmin() {
+    const pick = await vscode.window.showInformationMessage("Moon Core без прав администратора", {
+        modal: true,
+        detail: "Этот VS Code установлен для всех пользователей (в Program Files) — его файлы Windows разрешает менять только администратору, обойти это нельзя.\n\n" +
+            "Без администратора: установите VS Code вариантом «User Installer» (на странице загрузки — User Installer). Он ставится в папку пользователя, прав администратора не просит ни при установке, ни Moon Core. Настройки и расширения сохранятся.\n\n" +
+            "Окно документации C++ работает и без этого — во вкладке: F1 → «Документация C++: открыть окно во вкладке».",
+    }, "Открыть страницу загрузки");
+    if (pick) vscode.env.openExternal(vscode.Uri.parse("https://code.visualstudio.com/download"));
 }
 
 /** Нет прав — предложить записать с правами администратора (Windows). true — записали. */
 async function offerElevation(context, ops, what) {
     if (process.platform !== "win32" || !ops || !ops.length) return false;
     const pick = await vscode.window.showWarningMessage(
-        "Moon Core: нет прав на запись в папку VS Code. " + what + " с правами администратора? Windows один раз спросит разрешение.",
-        "С правами администратора", "Отмена");
+        "Moon Core: нет прав на запись в папку VS Code — он установлен для всех пользователей. " + what + " с правами администратора? Windows спросит разрешение (или пароль администратора).",
+        "С правами администратора", "Без администратора", "Отмена");
+    if (pick === "Без администратора") { await explainNoAdmin(); return false; }
     if (pick !== "С правами администратора") return false;
     // Под блокировкой: пока Windows спрашивает разрешение, другое окно не начнёт свою запись.
-    const r = await LK.withLockAsync(PL.lockFileOf(context), () => EL.execPlanElevated(ops));
+    // Ожидание запуска без ожидания/вручную — тоже под блокировкой.
+    const r = await LK.withLockAsync(PL.lockFileOf(context), async () => {
+        let x = await EL.execPlanElevated(ops, context.globalStorageUri.fsPath, process.execPath);
+        if (x.pending) {
+            const job = x.job;
+            x = await waitElevated(job, 180000, "Moon Core: подтвердите запрос прав администратора в окне Windows…");
+            if (x.timeout) x = { manual: true, job: job };
+        }
+        if (x.manual) x = await manualElevation(x.job, x.why);
+        return x;
+    });
     SH.resetStatusCache();
     if (r.busy) { vscode.window.showWarningMessage("Moon Core: " + REASONS.busy); return false; }
-    if (!r.ok) { vscode.window.showErrorMessage("Moon Core: не удалось (" + r.error + ")"); return false; }
+    if (r.cancelled) { vscode.window.showInformationMessage("Moon Core: запрос прав отменён."); return false; }
+    if (!r.ok) { vscode.window.showErrorMessage("Moon Core: не удалось (" + (r.error || "нет ответа") + ")"); return false; }
     // Итог проверяем сами (а не по «готово» из временной папки): каждый файл — то, что планировали.
     const bad = EL.verifyPlan(ops);
     if (bad.length) { vscode.window.showErrorMessage("Moon Core: после записи файлы не совпали с ожидаемыми: " + bad.map((o) => path.basename(o.file)).join(", ")); return false; }
@@ -94,8 +141,8 @@ async function offerElevation(context, ops, what) {
     return true;
 }
 
-/** Команда «Внедрить». */
-async function injectCommand(context) {
+/** Команда «Внедрить». done — начало вопроса о перезагрузке (по умолчанию «Moon Core внедрён.»). */
+async function injectCommand(context, done) {
     const r = await injectShared(context);
     if (!r.ok) {
         if (r.reason === "denied" && r.plan && await offerElevation(context, r.plan.ops, "Внедрить")) {
@@ -109,7 +156,7 @@ async function injectCommand(context) {
     await context.globalState.update(SH.WANT_KEY, true);
     const st = SH.status(context);
     if (await askShellTrust(context, st)) PL.healChecksum(SH.status(context), context);
-    await askReload(reloadText("Moon Core внедрён."));
+    await askReload(reloadText(typeof done === "string" && done ? done : "Moon Core внедрён."));
     return true;
 }
 
@@ -128,7 +175,7 @@ async function removeCommand(context) {
 /** Внедрить заново без вопроса (moonCore.autoReinject) или спросить с кнопкой «Всегда сам». */
 async function reinjectFlow(context, question) {
     const conf = SH.conf();
-    if (conf.get("autoReinject", false)) {
+    if (conf.get("autoReinject", true)) {
         const r = await injectShared(context);
         log("автовнедрение: " + JSON.stringify({ ok: r.ok, done: r.done, reason: r.reason }));
         if (r.ok) { await askReload("Moon Core снова встроен в VS Code после обновления. Перезагрузить окно?"); return; }
@@ -143,7 +190,7 @@ async function reinjectFlow(context, question) {
 /** Пустые следы be5invis custom-css в оболочке — предложить убрать (один раз на версию VS Code). */
 async function offerLegacyCleanup(context, st) {
     if (!st.some((s) => s.legacy)) return;
-    const key = "mooncore.legacyAskedFor";
+    const key = KEYS.LEGACY_ASKED_FOR;
     if (context.globalState.get(key) === vscode.version) return;
     await context.globalState.update(key, vscode.version);
     const pick = await vscode.window.showInformationMessage(
@@ -152,6 +199,25 @@ async function offerLegacyCleanup(context, st) {
     if (pick !== "Убрать") return;
     try { PL.cleanLegacy(st, context); log("следы старого загрузчика убраны"); }
     catch (e) { log("следы старого загрузчика", e); vscode.window.showErrorMessage("Moon Core: не удалось (" + e.message + ")"); }
+}
+
+/**
+ * Первый запуск после установки: Moon Core ни разу не был в оболочке и никто не говорил, что
+ * он не нужен (WANT_KEY не задан), — встроиться самому, без вопроса и без настройки. Пути
+ * берутся из самой установки VS Code (appRoot) и globalStorage, так что у любого человека
+ * всё находится само. Выключается moonCore.autoInject. Попытка — одна на версию VS Code:
+ * не вышло (отменили запрос прав) — дальше обычный вопрос. true — сценарий отработал.
+ */
+async function firstInject(context) {
+    if (context.globalState.get(SH.WANT_KEY) !== undefined || !SH.conf().get("autoInject", true)) return false;
+    const key = KEYS.AUTO_TRIED_FOR;
+    if (context.globalState.get(key) === vscode.version) return false;
+    await context.globalState.update(key, vscode.version);
+    log("первый запуск: встраиваюсь в оболочку VS Code сам (moonCore.autoInject)");
+    const ok = await injectCommand(context, "Moon Core установлен и встроен в VS Code — осталось перезагрузить окно.");
+    // Не вышло — вопрос «Внедрить?» в этой версии VS Code уже не нужен: ошибку только что показали.
+    if (!ok) await context.globalState.update(KEYS.PROMPTED_FOR, vscode.version);
+    return true;
 }
 
 /** При активации: VS Code обновился (блока нет) — встроить/спросить; рантайм устарел — обновить молча. */
@@ -184,8 +250,9 @@ async function checkOnActivate(context) {
         await reinjectFlow(context, "Moon Core пропал из оболочки VS Code: её перезаписало обновление или другой загрузчик (Custom CSS, Custom UI Style). Внедрить снова?");
         return;
     }
+    if (st.every((s) => !s.injected) && await firstInject(context)) return;
     if (st.every((s) => !s.injected)) {
-        const key = "mooncore.promptedFor";
+        const key = KEYS.PROMPTED_FOR;
         const ver = vscode.version;
         if (context.globalState.get(key) === ver) return;   // спрашиваем один раз на версию VS Code
         const pick = await vscode.window.showInformationMessage(

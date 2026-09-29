@@ -23,6 +23,7 @@ function watchModules(context, host) {
     const refresh = (askFirst) => {
         const list = MH.allowed(context, MH.discover());
         host.modules.setModules(list);
+        host.broadcastModuleSet();
         closeAll();
         // Слежение через папку скрипта: редакторы сохраняют «атомарно» (запись рядом + rename),
         // и watch на самом файле после первого сохранения замолкает.

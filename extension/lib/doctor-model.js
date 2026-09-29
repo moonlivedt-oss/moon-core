@@ -10,7 +10,7 @@
 // ============================================================
 "use strict";
 
-const ACTIONS = ["inject", "remove", "reload", "check", "heal", "log", "modules", "moduleDev", "recovery", "design", "refresh", "jsReview", "report"];
+const ACTIONS = ["inject", "remove", "reload", "check", "heal", "log", "modules", "moduleDev", "recovery", "design", "refresh", "jsReview", "report", "permissions", "export"];
 
 const base = (f) => String(f || "").split(/[\\/]/).slice(-3).join("/");
 
@@ -40,6 +40,9 @@ function problems(s) {
     const t = s.timing;
     if (t && t.failed && t.failed.length) add("error", "Модуль не выполнился: " + t.failed.join(", "), "Файл модуля не прошёл проверку целостности, пропал или был изменён. Moon Core переписал файлы — нужна перезагрузка окна.", "reload", "Перезагрузить окно");
     if (t && t.skipped && t.skipped.length) add("warn", "Пропущено защитой запуска: " + t.skipped.join(", "), "В прошлый раз окно не запустилось на этом модуле. Перезагрузи окно, чтобы попробовать снова.", "reload", "Перезагрузить окно");
+    const noisy = (Array.isArray(s.errors) ? s.errors : []).filter((e) => e && e.n >= 20);
+    if (noisy.length) add("warn", "Часто падает: " + noisy.map((e) => e.source + " (" + e.n + ")").join(", "), "Ошибки этого источника идут одна за другой — подробности в журнале.", "log", "Журнал");
+    if (b.dropped) add("info", "Отключено зависших окон: " + b.dropped, "Окно не читало события моста (стояло в отладчике или зависло) — хост отключил его, чтобы не копить память. Окно переподключится само.");
     const m = s.modules || {};
     if (m.pending && m.pending.length) add("warn", "Код модулей изменился и ждёт одобрения: " + m.pending.join(", "), "В оболочке пока прежняя одобренная версия.", "modules", "Модули");
     const sn = s.snippets || {};

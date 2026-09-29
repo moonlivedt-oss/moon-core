@@ -38,6 +38,18 @@
         }, 1500);
     });
 
+    // Состояние другого модуля в этом окне (ленивая загрузка, выключение без перезагрузки).
+    mc.on("probeState", function (d) {
+        var loadRes = null;
+        if (d && d.load) window.__MOONCORE__.loadModule(d.mod).then(function (ok) { loadRes = ok; }, function (e) { loadRes = "err " + e; });
+        setTimeout(function () {
+            var s = window.__MOONCORE__.moduleState(d && d.mod);
+            var sc = document.querySelector("script[data-mooncore-module=" + (d && d.mod) + "]");
+            state.modState = { id: d && d.id, state: s ? { loaded: s.loaded, off: s.off, lazy: s.lazy } : null, info: window.__MOONCORE__.info(), script: sc ? { src: sc.getAttribute("src"), integrity: sc.getAttribute("integrity") } : null, loadRes: loadRes };
+            mc.saveData(state);
+        }, d && d.load ? 4000 : 500);
+    });
+
     mc.on("probe", function (d) {
         if (!d || typeof d.selector !== "string") return;
         var el = null;

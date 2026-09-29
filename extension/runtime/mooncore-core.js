@@ -19,8 +19,10 @@
     if (window.__MOONCORE__) return;
 
     var BOOT = window.__MOONCORE_BOOT__ || {};
-    var T0 = (window.performance && performance.now) ? performance.now() : 0;
     function now() { return (window.performance && performance.now) ? performance.now() : Date.now(); }
+    // Та же шкала, что у now(): без performance было T0 = 0 при now() = Date.now() — время старта
+    // выходило «с 1970 года».
+    var T0 = now();
 
     // ---------------------------------------------------------------------------
     //  Защита запуска. Каждый запуск помечается «идёт» (n+1) и «последний модуль» (last); когда
@@ -38,7 +40,16 @@
     var skipAll = guard.n >= 3 && !guard.last, skipOne = guard.n >= 1 ? guard.last : "", skipped = [];
     function saveGuard() { try { localStorage.setItem(GUARD_KEY, JSON.stringify(guard)); } catch (e) {} }
     guard.n = skipAll ? 0 : guard.n + 1; guard.last = ""; saveGuard();
-    var timing = { runtime: 0, modules: {}, skipped: skipped, failed: [] };
+    var timing = { runtime: 0, modules: {}, skipped: skipped, failed: [], stages: {} };
+    /**
+     * Этап старта окна: мс от начала рантайма (в Доктор) и performance.mark «mooncore:<этап>»
+     * (видно во вкладке Performance DevTools). Каждый этап — один раз, первое достижение.
+     */
+    function stage(name) {
+        if (timing.stages[name] != null) return;
+        timing.stages[name] = Math.round((now() - T0) * 10) / 10;
+        try { if (window.performance && performance.mark) performance.mark("mooncore:" + name); } catch (e) {}
+    }
     var modRan = {};   // файл модуля начал выполняться (его первая строка зовёт _skip)
     var PROTO = BOOT.proto || { VERSION: 1, MAX_SNIPPET: 262144, MAX_SNIPPETS: 200, MAX_LOG: 4000, RPC_TIMEOUT_MS: 8000 };
     var NONCE = (document.currentScript && document.currentScript.nonce) || "";
@@ -97,6 +108,41 @@
     }
 
     // ---------------------------------------------------------------------------
+    //  Trusted Types. В VS Code с CSP «require-trusted-types-for 'script'» строка не станет кодом
+    //  (eval, <script>.textContent) и адресом скрипта (<script>.src) без политики из списка CSP.
+    //  Moon Core вписывает туда «mooncore» при внедрении. Политика создаётся сразу при старте (имя
+    //  не займёт чужой скрипт) и пропускает:
+    //    - код — только ту строку, которую рантайм передал сам через trustedScript() (чанк
+    //      интерфейса после сверки SHA-256, код модуля от хоста, JS-сниппет);
+    //    - адрес — только файл модуля рядом с оболочкой (mooncore-mod-<id>.js).
+    //  Нет Trusted Types (старый VS Code, стенд) — строки идут как есть.
+    // ---------------------------------------------------------------------------
+    var ttPolicy = null, ttScript = null;
+    var TT_SRC_RE = /^mooncore-mod-[a-z0-9-]{2,32}\.js$/;
+    try {
+        if (window.trustedTypes && typeof window.trustedTypes.createPolicy === "function") {
+            ttPolicy = window.trustedTypes.createPolicy("mooncore", {
+                createScript: function (s) { if (s !== ttScript) throw new Error("Moon Core: непроверенный код"); return s; },
+                createScriptURL: function (u) {
+                    var base = typeof BOOT.moduleFileBase === "string" ? BOOT.moduleFileBase : "";
+                    if (u.indexOf(base) !== 0 || !TT_SRC_RE.test(u.slice(base.length))) throw new Error("Moon Core: чужой адрес скрипта");
+                    return u;
+                },
+            });
+        }
+    } catch (e) { ttPolicy = null; }   // имени нет в списке CSP — строки пойдут как есть
+    function trustedScript(code) {
+        if (!ttPolicy) return code;
+        ttScript = code;
+        try { return ttPolicy.createScript(code); } finally { ttScript = null; }
+    }
+    function trustedScriptUrl(u) { return ttPolicy ? ttPolicy.createScriptURL(u) : u; }
+    /** Ошибка запрета кода из строки: CSP без unsafe-eval или Trusted Types. */
+    function isCodeBlocked(e) {
+        return (typeof EvalError === "function" && e instanceof EvalError) || /unsafe-eval|Content Security Policy|Trusted ?Type|TrustedScript/i.test(String(e && e.message || e));
+    }
+
+    // ---------------------------------------------------------------------------
     //  Мост: подключаемся ко всем живым хостам из mooncore-bridge.json.
     // ---------------------------------------------------------------------------
     var hosts = {};          // token -> {port, token, es, errors, open}
@@ -144,7 +190,12 @@
         try { rec.es = new EventSource("http://127.0.0.1:" + rec.port + "/events/" + rec.token); }
         catch (e) { return; }
         hosts[rec.token] = rec;
-        rec.es.onopen = function () { rec.errors = 0; rec.open = true; if (hasFocus() && !ownToken) probeOwnHost(); };
+        rec.es.onopen = function () {
+            stage("bridge"); rec.errors = 0; rec.open = true;
+            if (hasFocus() && !ownToken) probeOwnHost();
+            // Новый (или вернувшийся) хост не знает подписок модулей на события VS Code и их команд.
+            setTimeout(function () { try { vsResubscribe(null); } catch (e) {} }, 0);
+        };
         rec.es.onerror = function () {
             rec.open = false;
             // Хост из файла мёртв (адрес прошлого сеанса) — не переподключаемся вечно.
@@ -166,6 +217,8 @@
         on(rec, "profile", function (d) { applyModuleProfile(d); });
         on(rec, "moduleReload", function (d) { hotReloadModule(rec, d); });
         on(rec, "ctx", function (d) { onCtx(rec, d); });
+        on(rec, "vs", function (d) { deliverVs(rec, d); });
+        on(rec, "moduleSet", function (d) { applyModuleSet(rec, d); });
     }
     function on(rec, ev, fn) {
         rec.es.addEventListener(ev, function (e) {
@@ -190,10 +243,15 @@
         return list;
     }
 
-    function rpc(h, method, body) {
+    // timeoutMs — своё ожидание (долгие запросы модулей: компиляция); по умолчанию RPC_TIMEOUT_MS.
+    // Оборвали по времени — ответ { timeout: true }, а не { net: true }: хост, скорее всего, жив и
+    // ещё работает, и слать тот же запрос следующему хосту (второй раз выполнять) нельзя.
+    function rpc(h, method, body, timeoutMs) {
         if (typeof fetch !== "function") return Promise.resolve({ ok: false, error: "нет fetch" });
         var ctl = typeof AbortController === "function" ? new AbortController() : null;
-        var timer = setTimeout(function () { if (ctl) ctl.abort(); }, PROTO.RPC_TIMEOUT_MS || 8000);
+        var timedOut = false;
+        var wait = timeoutMs > 0 ? Math.min(timeoutMs, 10 * 60000) : (PROTO.RPC_TIMEOUT_MS || 8000);
+        var timer = setTimeout(function () { timedOut = true; if (ctl) ctl.abort(); }, wait);
         return fetch("http://127.0.0.1:" + h.port + "/rpc/" + h.token + "/" + method, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -203,7 +261,10 @@
         }).then(function (res) {
             if (res.status === 409) return { ok: false, retry: true };
             return res.json().catch(function () { return { ok: res.ok }; });
-        }).catch(function (e) { return { ok: false, error: String(e && e.message || e), net: true }; })
+        }).catch(function (e) {
+            if (timedOut) return { ok: false, error: "нет ответа за " + Math.round(wait / 1000) + " с", timeout: true };
+            return { ok: false, error: String(e && e.message || e), net: true };
+        })
           .then(function (out) { clearTimeout(timer); return out; });
     }
 
@@ -251,6 +312,11 @@
             dataUrl: typeof m.dataUrl === "string" ? m.dataUrl : "",
             // Стенд (test/serve.js) не умеет vscode-file: данные приходят прямо в boot.
             data: (m.data && typeof m.data === "object") ? m.data : null,
+            // Файл модуля рядом с оболочкой { src, integrity } (ленивая загрузка, повторное включение)
+            // и ленивость { delay }. Ленивый модуль не выполнен, пока его не загрузят.
+            file: m.file && typeof m.file.src === "string" && /^[\w.-]+\.js$/.test(m.file.src) ? { src: m.file.src, integrity: String(m.file.integrity || "") } : null,
+            lazy: m.lazy && typeof m.lazy === "object" ? { delay: Math.max(0, +m.lazy.delay || 0) } : null,
+            loaded: !(m.lazy && m.file), off: false,
         };
     });
 
@@ -304,6 +370,14 @@
 
     function deliverModule(rec, d) {
         if (!d || !MODS[d.id] || !MOD_EV_RE.test(String(d.event))) return;
+        // Разовое событие (клик, команда): не кэшируется — новые подписчики его не получат.
+        // Модуль ещё не загружен (ленивый) или выключен — событие ждёт загрузки.
+        if (d.once) {
+            if (d.scope === "window" && !isOwnHost(rec.token)) return;
+            if (!MODS[d.id].loaded || MODS[d.id].off) { queueOnce(d); return; }
+            fireModule(d.id, d.event, d.data);
+            return;
+        }
         var slot = (modLast[d.id] = modLast[d.id] || {});
         var last = (slot[d.event] = slot[d.event] || { all: null, win: {} });
         if (d.scope === "window") {
@@ -324,14 +398,14 @@
     }
 
     /** Запрос модуля: сначала свой хост; хост без обработчика или без связи — следующий. */
-    function moduleRpc(id, method, body) {
+    function moduleRpc(id, method, body, timeoutMs) {
         var prefer = ownToken && hosts[ownToken] ? hosts[ownToken] : null;
         var list = hostList(prefer);
         var i = 0;
         var req = { id: id, method: method, body: body === undefined ? null : body };
         function next() {
             if (i >= list.length) return Promise.resolve({ ok: false, error: "нет связи с расширением модуля" });
-            return rpc(list[i++], "module", req).then(function (r) {
+            return rpc(list[i++], "module", req, timeoutMs).then(function (r) {
                 return r && (r.retry || r.net || r.error === "no handler") ? next() : r;
             });
         }
@@ -388,9 +462,10 @@
             /** Последнее значение события (или undefined). */
             get: function (ev) { return lastModule(id, ev); },
             /** Запрос к своему расширению: Promise<{ok, result?, error?}>. */
-            rpc: function (method, body) {
+            rpc: function (method, body, opts) {
                 if (!MOD_EV_RE.test(String(method))) return Promise.resolve({ ok: false, error: "bad method" });
-                return moduleRpc(id, method, body);
+                var t = opts && typeof opts.timeoutMs === "number" && isFinite(opts.timeoutMs) ? opts.timeoutMs : 0;
+                return moduleRpc(id, method, body, t);
             },
             /** Ошибка модуля — в журнал Moon Core (Output «Moon Core»). */
             log: function (where, err) { report("модуль " + id + (err === undefined ? "" : ": " + where), err === undefined ? where : err); },
@@ -450,6 +525,8 @@
             /** Есть ли сейчас связь хотя бы с одним хостом. */
             connected: function () { return Object.keys(hosts).some(function (t) { return hosts[t].open; }); },
         };
+        // События VS Code, команды, окна, общая шина, части окна (21-vs.js, 83-windows.js, 84-shared.js).
+        extendModuleApi(id, modApis[id]);
         return modApis[id];
     }
 
@@ -466,7 +543,12 @@
         if (modHot[id] === d.sha) return;                      // уже перезапущен (событие от другого хоста)
         modHot[id] = d.sha;
         rpc(rec, "moduleCode", { id: id }).then(function (r) {
-            if (!r || !r.ok || typeof r.code !== "string") { report("модуль " + id + ": горячая перезагрузка", (r && r.error) || "хост не отдал код"); return; }
+            if (!r || !r.ok || typeof r.code !== "string") {
+                // Код не пришёл (хост занят, сеть) — следующее событие с тем же sha повторит попытку.
+                if (modHot[id] === d.sha) delete modHot[id];
+                report("модуль " + id + ": горячая перезагрузка", (r && r.error) || "хост не отдал код");
+                return;
+            }
             var list = modDispose[id] || [];
             modDispose[id] = [];
             for (var i = list.length - 1; i >= 0; i--) { try { list[i](); } catch (e) { report("модуль " + id + ": уборка", e); } }
@@ -477,10 +559,280 @@
             var s = document.createElement("script");
             if (NONCE) s.setAttribute("nonce", NONCE);
             s.setAttribute("data-mooncore-module", id);
-            s.textContent = "try{\n" + r.code + "\n}catch(e){window.__MOONCORE__.fail(" + JSON.stringify("модуль " + id) + ",e);}\n//# sourceURL=mooncore-module/" + id + ".js";
+            s.textContent = trustedScript("try{\n" + r.code + "\n}catch(e){window.__MOONCORE__.fail(" + JSON.stringify("модуль " + id) + ",e);}\n//# sourceURL=mooncore-module/" + id + ".js");
             headEl().appendChild(s);
             s.remove();
             try { toast("Moon Core: модуль " + (MODS[id].name || id) + " перезапущен"); } catch (e) {}
+        });
+    }
+
+    // ---------------------------------------------------------------------------
+    //  VS Code для модулей: события редактора (mc.vscode.on), код под курсором и подсказки
+    //  языкового сервера (mc.vscode.symbol), подсветка кода (decorate), вкладки, части окна
+    //  (mc.layout) и команды модуля в палитре и контекстном меню (mc.commands).
+    //
+    //  Подписка уходит ВСЕМ хостам (каждый шлёт события своего окна), а применяются события только
+    //  своего хоста. Хост держит подписку, пока окно подтверждает её раз в минуту. full-часть
+    //  события (слово, выделение, путь, тексты ошибок) хост отдаёт модулям с правом editor.read —
+    //  окно передаёт её только им (d.readers).
+    // ---------------------------------------------------------------------------
+    var VS_KINDS = ["editor", "cursor", "save", "diagnostics", "debug", "terminal", "task", "git", "theme"];
+    var vsSubs = {};         // id модуля -> kind -> [fn]
+    var vsLast = {};         // kind -> последнее событие своего хоста { data, full, readers }
+    var modCmds = {};        // id модуля -> команды, объявленные из окна
+
+    function vsKindsOf(id) {
+        var byKind = vsSubs[id] || {};
+        return Object.keys(byKind).filter(function (k) { return byKind[k].length > 0; });
+    }
+    /** Подписки модуля id (или всех) — всем хостам. */
+    function vsResubscribe(onlyId) {
+        Object.keys(vsSubs).forEach(function (id) {
+            if (onlyId && id !== onlyId) return;
+            var kinds = vsKindsOf(id);
+            if (!kinds.length || !MODS[id] || MODS[id].off) return;
+            Object.keys(hosts).forEach(function (t) { if (hosts[t].open) rpc(hosts[t], "vsSubscribe", { id: id, kinds: kinds }); });
+        });
+        Object.keys(modCmds).forEach(function (id) {
+            if (onlyId && id !== onlyId) return;
+            Object.keys(hosts).forEach(function (t) { if (hosts[t].open) rpc(hosts[t], "modCommands", { id: id, commands: modCmds[id] }); });
+        });
+    }
+    setInterval(function () { try { vsResubscribe(null); } catch (e) {} }, 60000);
+
+    /** Событие для модуля id: базовая часть плюс full, если модуль среди читателей. */
+    function vsPayload(d, id) {
+        if (!d || d.data == null) return null;
+        var out = {};
+        Object.keys(d.data).forEach(function (k) { out[k] = d.data[k]; });
+        if (d.full && Array.isArray(d.readers) && d.readers.indexOf(id) !== -1) Object.keys(d.full).forEach(function (k) { out[k] = d.full[k]; });
+        return out;
+    }
+
+    function deliverVs(rec, d) {
+        if (!d || VS_KINDS.indexOf(d.kind) === -1 || !isOwnHost(rec.token)) return;
+        vsLast[d.kind] = d;
+        Object.keys(vsSubs).forEach(function (id) {
+            var list = vsSubs[id][d.kind];
+            if (!list || !list.length || !MODS[id] || MODS[id].off) return;
+            var p = vsPayload(d, id);
+            list.slice().forEach(function (fn) { try { fn(p); } catch (e) { report("модуль " + id + ": событие VS Code " + d.kind, e); } });
+        });
+    }
+
+    // Части окна по вёрстке VS Code: видимость и размеры читаем сами, переключаем — командой.
+    var PART_SEL = {
+        sidebar: ".part.sidebar", panel: ".part.panel", auxiliarybar: ".part.auxiliarybar", activitybar: ".part.activitybar",
+        statusbar: ".part.statusbar", titlebar: ".part.titlebar", editor: ".part.editor", minimap: ".minimap",
+    };
+    function partEl(part) { return PART_SEL[part] ? document.querySelector(PART_SEL[part]) : null; }
+    function partRect(el) {
+        if (!el) return null;
+        var r = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+        var st = null;
+        try { st = window.getComputedStyle ? getComputedStyle(el) : null; } catch (e) {}
+        var shown = !!r && r.width > 0 && r.height > 0 && !(st && (st.display === "none" || st.visibility === "hidden"));
+        return { x: r ? Math.round(r.left) : 0, y: r ? Math.round(r.top) : 0, w: r ? Math.round(r.width) : 0, h: r ? Math.round(r.height) : 0, visible: shown };
+    }
+    function layoutApi(id) {
+        var visible = function (part) { var r = partRect(partEl(part)); return !!(r && r.visible); };
+        var toggle = function (part) { return nativeRpc(id, { op: "layout", part: String(part) }); };
+        var set = function (part, want) {
+            if (visible(part) === want) return Promise.resolve({ ok: true, changed: false });
+            return toggle(part).then(function (r) { return r && r.ok ? { ok: true, changed: true } : r; });
+        };
+        return {
+            /** Видна ли часть окна: sidebar, panel, auxiliarybar, activitybar, statusbar, titlebar, editor, minimap. */
+            visible: visible,
+            /** Размеры и видимость всех частей: { part: { x, y, w, h, visible } }. */
+            sizes: function () {
+                var out = {};
+                Object.keys(PART_SEL).forEach(function (p) { var r = partRect(partEl(p)); if (r) out[p] = r; });
+                return out;
+            },
+            /** Переключить часть (нужно право layout); ещё zen и maximizedPanel. */
+            toggle: toggle,
+            show: function (part) { return set(part, true); },
+            hide: function (part) { return set(part, false); },
+        };
+    }
+
+    function commandsApi(id, api) {
+        return {
+            /** Объявить команды модуля: [{ id, title, langs?, context? }] — в палитре и контекстном меню. */
+            register: function (list) {
+                modCmds[id] = (Array.isArray(list) ? list : []).slice(0, 20).map(function (c) {
+                    return { id: String(c && c.id || ""), title: String(c && c.title || ""), langs: Array.isArray(c && c.langs) ? c.langs.slice(0, 20) : [], context: !!(c && c.context) };
+                });
+                vsResubscribe(id);
+                return modCmds[id].length;
+            },
+            /** Нажали команду модуля: fn(ctx) — { lang, line, word?, selection?, path? } (слово и путь — с editor.read). */
+            on: function (cmdId, fn) {
+                return api.on("command", function (d) { if (d && d.id === cmdId) fn(d.ctx || {}); });
+            },
+        };
+    }
+
+    /** Дополнить помощника модуля (зовёт moduleApi в 20-modules.js). */
+    function extendModuleApi(id, api) {
+        var v = api.vscode;
+        /**
+         * Событие VS Code: editor, cursor, save, diagnostics, debug, terminal, task, git, theme.
+         * Текущее значение приходит сразу. Возвращает отписку.
+         */
+        v.on = function (kind, fn) {
+            if (VS_KINDS.indexOf(kind) === -1 || typeof fn !== "function") return function () {};
+            var byKind = (vsSubs[id] = vsSubs[id] || {});
+            var list = (byKind[kind] = byKind[kind] || []);
+            list.push(fn);
+            if (vsLast[kind]) {
+                var cur = vsPayload(vsLast[kind], id);
+                setTimeout(function () { if (list.indexOf(fn) !== -1) { try { fn(cur); } catch (e) { report("модуль " + id + ": событие VS Code " + kind, e); } } }, 0);
+            }
+            if (list.length === 1) vsResubscribe(id);
+            return function () { var i = list.indexOf(fn); if (i !== -1) list.splice(i, 1); };
+        };
+        /** Последнее событие VS Code (или undefined). */
+        v.last = function (kind) { return vsLast[kind] ? vsPayload(vsLast[kind], id) : undefined; };
+        /** Код под курсором (право editor.read): what = word | hover | definition | symbols. */
+        v.symbol = function (what) { return nativeRpc(id, { op: "symbol", what: String(what || "word") }); };
+        /** Подсветка в активном редакторе (право decorations): key, стиль, [{ line, start?, end?, hover? }]. */
+        v.decorate = function (key, style, ranges) { return nativeRpc(id, { op: "decorate", key: String(key), style: style || {}, ranges: ranges || [] }); };
+        v.undecorate = function (key) { return nativeRpc(id, { op: "undecorate", key: String(key) }); };
+        /** Открытые вкладки по группам (пути — с правом editor.read). */
+        v.tabs = function () { return nativeRpc(id, { op: "tabs" }); };
+        api.layout = layoutApi(id);
+        api.commands = commandsApi(id, api);
+        /** Плавающее окно модуля (83-windows.js). */
+        api.window = function (opts) { return createWindow(id, opts); };
+        /** Общая шина модулей (84-shared.js): значение, которое видят другие модули этого окна. */
+        api.share = function (key, value) { return shareValue(id, key, value); };
+        api.shared = function (key, fn) { return sharedOn(key, fn); };
+        api.sharedGet = function (key) { return sharedGet(key); };
+        /** Загрузить другой (ленивый) модуль: Promise<boolean>. */
+        api.load = function (other) { return loadModule(String(other)); };
+    }
+
+    // ---------------------------------------------------------------------------
+    //  Жизнь модуля в окне без перезагрузки.
+    //    - Ленивый модуль ("lazy" в манифесте) не грузится при старте: файл рядом с оболочкой
+    //      подключается по его команде, по просьбе другого модуля (mc.load / __MOONCORE__.loadModule)
+    //      или через delay мс после загрузки окна. Разовые события (команда) ждут загрузки.
+    //    - Хост сообщает список разрешённых модулей (событие moduleSet): выключенный модуль
+    //      убирается сразу (его onDispose, подписки, окна, значения в общей шине), включённый
+    //      снова — загружается тем же файлом. Модуль, которого нет в оболочке, требует перезагрузки.
+    // ---------------------------------------------------------------------------
+    var onceQueue = {};      // id -> [разовое событие], ждущее загрузки модуля
+    var loadingMod = {};     // id -> Promise загрузки
+
+    function queueOnce(d) {
+        var q = (onceQueue[d.id] = onceQueue[d.id] || []);
+        q.push(d);
+        if (q.length > 20) q.shift();
+        if (!MODS[d.id].off) loadModule(d.id);
+    }
+    function flushOnce(id) {
+        var q = onceQueue[id] || [];
+        delete onceQueue[id];
+        q.forEach(function (d) { fireModule(d.id, d.event, d.data); });
+    }
+
+    /** Загрузить файл модуля (ленивого или выключенного раньше). Promise<boolean>. */
+    function loadModule(id) {
+        var m = MODS[id];
+        if (!m) return Promise.resolve(false);
+        if (m.loaded && !m.off) return Promise.resolve(true);
+        if (loadingMod[id]) return loadingMod[id];
+        if (!m.file) {
+            report("модуль " + id, "модуль встроен в оболочку целиком — снова включить его можно только перезагрузкой окна");
+            return Promise.resolve(false);
+        }
+        m.off = false;
+        loadingMod[id] = new Promise(function (resolve) {
+            var s = document.createElement("script");
+            var done = function (ok) {
+                delete loadingMod[id];
+                if (ok) { m.loaded = true; setTimeout(function () { flushOnce(id); }, 0); }
+                resolve(ok);
+            };
+            var finish = function (ok) {
+                window.__MOONCORE__._modDone(id);
+                if (ok) { done(true); return; }
+                // Файла нет или он другой (integrity): модуль обновило или убрало другое окно. Берём
+                // одобренный код у хоста и выполняем тем же путём, что сниппеты, — <script nonce>.
+                rpcFirst("moduleCode", { id: id, lazy: true }, ownToken && hosts[ownToken] ? hosts[ownToken] : null).then(function (r) {
+                    if (!r || !r.ok || typeof r.code !== "string") {
+                        report("модуль " + id, "файл модуля не загрузился (" + m.file.src + "), хост код не отдал: " + ((r && r.error) || "нет связи"));
+                        done(false);
+                        return;
+                    }
+                    var s2 = document.createElement("script");
+                    if (NONCE) s2.setAttribute("nonce", NONCE);
+                    s2.setAttribute("data-mooncore-module", id);
+                    try {
+                        s2.textContent = trustedScript("try{\n" + r.code + "\n}catch(e){window.__MOONCORE__.fail(" + JSON.stringify("модуль " + id) + ",e);}\n//# sourceURL=mooncore-module/" + id + ".js");
+                        headEl().appendChild(s2);
+                        s2.remove();
+                    } catch (e) { report("модуль " + id + ": код от хоста", e); done(false); return; }
+                    done(true);
+                });
+            };
+            if (NONCE) s.setAttribute("nonce", NONCE);
+            if (m.file.integrity) s.setAttribute("integrity", m.file.integrity);
+            s.setAttribute("data-mooncore-module", id);
+            s.onload = function () { finish(!!modRan[id]); };
+            s.onerror = function () { finish(false); };
+            modRan[id] = false;
+            window.__MOONCORE__._modStart(id);
+            // Адрес — через политику Trusted Types (05-trusted.js): VS Code с CSP иначе откажет.
+            // Отказ здесь — тот же путь, что и незагрузившийся файл: код у хоста.
+            try {
+                s.src = trustedScriptUrl((typeof BOOT.moduleFileBase === "string" ? BOOT.moduleFileBase : "") + m.file.src);
+                headEl().appendChild(s);
+            } catch (e) { report("модуль " + id + ": адрес файла", e); finish(false); }
+        });
+        return loadingMod[id];
+    }
+
+    /** Выключить модуль в этом окне: его уборка, подписки, окна и значения в общей шине. */
+    function disableModule(id) {
+        var m = MODS[id];
+        if (!m || m.off) return;
+        m.off = true;
+        var list = modDispose[id] || [];
+        modDispose[id] = [];
+        for (var i = list.length - 1; i >= 0; i--) { try { list[i](); } catch (e) { report("модуль " + id + ": уборка", e); } }
+        delete modSubs[id];
+        delete modProfile[id];
+        delete vsSubs[id];
+        delete modCmds[id];
+        delete onceQueue[id];
+        closeModuleWindows(id);
+        sharedDrop(id);
+        m.loaded = false;
+        try { toast("Moon Core: модуль " + (m.name || id) + " выключен"); } catch (e) {}
+    }
+
+    function applyModuleSet(rec, d) {
+        // Разрешения общие для всех окон (globalState), поэтому годится любой хост: список шлёт тот,
+        // кто только что их поменял, а при подключении — каждый.
+        if (!d || !Array.isArray(d.ids) || !rec) return;
+        Object.keys(MODS).forEach(function (id) {
+            var want = d.ids.indexOf(id) !== -1, m = MODS[id];
+            if (!want && !m.off) disableModule(id);
+            else if (want && m.off) {
+                m.off = false;
+                if (!m.lazy) loadModule(id).then(function (ok) { if (ok) { try { toast("Moon Core: модуль " + (m.name || id) + " включён"); } catch (e) {} } });
+            }
+        });
+    }
+
+    // Ленивые модули с задержкой: после загрузки окна.
+    function scheduleLazy() {
+        Object.keys(MODS).forEach(function (id) {
+            var m = MODS[id];
+            if (m.lazy && m.lazy.delay > 0 && !m.loaded) setTimeout(function () { if (!m.off) loadModule(id); }, m.lazy.delay);
         });
     }
 
@@ -654,8 +1006,8 @@
         var fn = null;
         try { fn = new Function("mc", "\"use strict\";\n" + code + "\n//# sourceURL=mooncore/" + id); }
         catch (e) {
-            if (!(e instanceof EvalError) && !/unsafe-eval|Content Security Policy/i.test(String(e && e.message))) { report("синтаксис", e, id); return; }
-            fn = null;       // CSP запрещает eval — исполняем через <script nonce>
+            if (!isCodeBlocked(e)) { report("синтаксис", e, id); return; }
+            fn = null;       // CSP или Trusted Types запрещают eval — исполняем через <script nonce>
         }
         if (fn) {
             try {
@@ -668,7 +1020,7 @@
         window.__MOONCORE_RUN__[id] = api;
         var s = document.createElement("script");
         if (NONCE) s.setAttribute("nonce", NONCE);
-        s.textContent = "(function(mc){\"use strict\";try{\n" + code + "\n}catch(e){window.__MOONCORE__.fail(" + JSON.stringify(id) + ",e);}})(window.__MOONCORE_RUN__[" + JSON.stringify(id) + "]);";
+        s.textContent = trustedScript("(function(mc){\"use strict\";try{\n" + code + "\n}catch(e){window.__MOONCORE__.fail(" + JSON.stringify(id) + ",e);}})(window.__MOONCORE_RUN__[" + JSON.stringify(id) + "]);");
         headEl().appendChild(s);
         s.remove();
     }
@@ -1015,25 +1367,9 @@
             return Array.prototype.map.call(new Uint8Array(buf), function (b) { return ("0" + b.toString(16)).slice(-2); }).join("");
         });
     }
-    function isCspError(e) {
-        return (typeof EvalError === "function" && e instanceof EvalError) || /unsafe-eval|Content Security Policy|Trusted ?Type/i.test(String(e && e.message || e));
-    }
-    // Trusted Types: VS Code пускает код из строки только через политику из списка CSP; Moon Core
-    // вписывает туда «mooncore» при внедрении. Политика создаётся сразу (имя не займёт чужой
-    // скрипт) и пропускает только ту строку, которую загрузчик сверил по SHA-256.
-    var uiPolicy = null, uiVerified = null;
-    try {
-        if (window.trustedTypes && typeof window.trustedTypes.createPolicy === "function") {
-            uiPolicy = window.trustedTypes.createPolicy("mooncore", {
-                createScript: function (s) { if (s !== uiVerified) throw new Error("Moon Core: непроверенный код"); return s; },
-            });
-        }
-    } catch (e) { uiPolicy = null; }   // имени нет в списке CSP — eval попробуем как есть
-    function trustedScript(code) {
-        if (!uiPolicy) return code;
-        uiVerified = code;
-        try { return uiPolicy.createScript(code); } finally { uiVerified = null; }
-    }
+    // Trusted Types — политика «mooncore» (05-trusted.js): код чанка проходит её только после
+    // сверки SHA-256 ниже.
+    var isCspError = isCodeBlocked;
     /** Прямой eval: код чанка видит область рантайма (свои функции он объявляет у себя). */
     function evalUi(code) { return eval(trustedScript(code)); }
 
@@ -1601,6 +1937,193 @@
     };
 
     // ---------------------------------------------------------------------------
+    //  Плавающие окна модулей (mc.window): общий сервис вместо своего окна в каждом модуле.
+    //  Заголовок с перетаскиванием, уголок для размера, прилипание к краям окна VS Code, место и
+    //  размер запоминаются (localStorage, по модулю и id окна). Содержимое модуль строит сам в
+    //  win.body обычным DOM (без innerHTML — Trusted Types не нужны). Окна модуля закрываются при
+    //  его выключении и горячей перезагрузке.
+    // ---------------------------------------------------------------------------
+    var WINS = {};           // "мод/id" -> окно
+    var WIN_ID_RE = /^[\w.-]{1,40}$/;
+    var SNAP = 16;
+
+    function winKey(mod, id) { return "mooncore.win." + mod + "." + id; }
+    function winLoad(mod, id) { try { var g = JSON.parse(localStorage.getItem(winKey(mod, id)) || "null"); return g && typeof g === "object" ? g : null; } catch (e) { return null; } }
+    function winSave(mod, id, g) { try { localStorage.setItem(winKey(mod, id), JSON.stringify(g)); } catch (e) {} }
+    function viewport() { return { w: window.innerWidth || 1200, h: window.innerHeight || 800 }; }
+
+    /** Вписать геометрию в окно VS Code и прилепить к краям, если близко. */
+    function fitGeom(g) {
+        var v = viewport();
+        var w = Math.max(160, Math.min(v.w, g.w | 0)), h = Math.max(100, Math.min(v.h, g.h | 0));
+        var x = Math.max(0, Math.min(v.w - w, g.x | 0)), y = Math.max(0, Math.min(v.h - h, g.y | 0));
+        if (x < SNAP) x = 0;
+        if (y < SNAP) y = 0;
+        if (v.w - (x + w) < SNAP) x = v.w - w;
+        if (v.h - (y + h) < SNAP) y = v.h - h;
+        return { x: x, y: y, w: w, h: h };
+    }
+
+    function createWindow(mod, opts) {
+        var o = opts || {};
+        var id = WIN_ID_RE.test(String(o.id || "")) ? String(o.id) : "main";
+        var key = mod + "/" + id;
+        if (WINS[key]) { if (o.title) WINS[key].setTitle(o.title); return WINS[key]; }
+        var v = viewport();
+        var w0 = o.width > 0 ? o.width : 420, h0 = o.height > 0 ? o.height : 320;
+        var geom = fitGeom(winLoad(mod, id) || { x: o.x >= 0 ? o.x : (v.w - w0) / 2, y: o.y >= 0 ? o.y : (v.h - h0) / 3, w: w0, h: h0 });
+        var closers = [];
+
+        var el = document.createElement("div");
+        el.setAttribute("data-mooncore-ui", "window");
+        el.setAttribute("data-mooncore-owner", mod);
+        Object.assign(el.style, {
+            position: "fixed", zIndex: String(Z - 20), display: "flex", flexDirection: "column", overflow: "hidden",
+            background: "var(--vscode-editorWidget-background, #1e1e2e)", color: "var(--vscode-editorWidget-foreground, #cdd6f4)",
+            border: "1px solid var(--vscode-widget-border, var(--vscode-focusBorder, #45475a))", borderRadius: "8px",
+            boxShadow: "0 12px 40px rgba(0,0,0,.45)", font: "13px/1.4 var(--vscode-font-family, sans-serif)",
+        });
+        var head = document.createElement("div");
+        Object.assign(head.style, { display: "flex", alignItems: "center", gap: "8px", padding: "6px 10px", cursor: "move", userSelect: "none",
+            background: "var(--vscode-titleBar-activeBackground, rgba(127,127,127,.12))", borderBottom: "1px solid var(--vscode-widget-border, transparent)" });
+        var title = document.createElement("div");
+        Object.assign(title.style, { flex: "1", fontWeight: "600", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
+        title.textContent = String(o.title || (MODS[mod] && MODS[mod].name) || mod);
+        var close = document.createElement("div");
+        close.textContent = "×";
+        close.title = "Закрыть";
+        Object.assign(close.style, { cursor: "pointer", fontSize: "16px", padding: "0 4px", opacity: ".75" });
+        head.appendChild(title);
+        head.appendChild(close);
+        var body = document.createElement("div");
+        Object.assign(body.style, { flex: "1", overflow: "auto", padding: o.padding === false ? "0" : "10px" });
+        var grip = document.createElement("div");
+        Object.assign(grip.style, { position: "absolute", right: "0", bottom: "0", width: "14px", height: "14px", cursor: "nwse-resize",
+            background: "linear-gradient(135deg, transparent 50%, var(--vscode-focusBorder, #89b4fa) 50%)", opacity: ".6" });
+        el.appendChild(head);
+        el.appendChild(body);
+        el.appendChild(grip);
+
+        function place() { el.style.left = geom.x + "px"; el.style.top = geom.y + "px"; el.style.width = geom.w + "px"; el.style.height = geom.h + "px"; }
+        function commit() { geom = fitGeom(geom); place(); winSave(mod, id, geom); }
+        place();
+
+        // Перетаскивание заголовка и уголка: слушатели документа — только пока тянут.
+        function drag(e, resize) {
+            if (e.button !== undefined && e.button !== 0) return;
+            if (e.target === close) return;
+            var sx = e.clientX, sy = e.clientY, g0 = { x: geom.x, y: geom.y, w: geom.w, h: geom.h };
+            var move = function (ev) {
+                var dx = ev.clientX - sx, dy = ev.clientY - sy;
+                geom = resize ? { x: g0.x, y: g0.y, w: g0.w + dx, h: g0.h + dy } : { x: g0.x + dx, y: g0.y + dy, w: g0.w, h: g0.h };
+                geom = fitGeom(geom);
+                place();
+            };
+            var up = function () { document.removeEventListener("mousemove", move, true); document.removeEventListener("mouseup", up, true); commit(); };
+            document.addEventListener("mousemove", move, true);
+            document.addEventListener("mouseup", up, true);
+            if (e.preventDefault) e.preventDefault();
+        }
+        head.addEventListener("mousedown", function (e) { drag(e, false); });
+        grip.addEventListener("mousedown", function (e) { drag(e, true); });
+
+        var win = {
+            id: id, el: el, body: body,
+            setTitle: function (t) { title.textContent = String(t); return win; },
+            show: function () { if (!el.isConnected && document.body) document.body.appendChild(el); return win; },
+            hide: function () { try { el.remove(); } catch (e) {} return win; },
+            toggle: function () { return el.isConnected ? win.hide() : win.show(); },
+            isOpen: function () { return !!el.isConnected; },
+            /** Прилепить: left | right | top | bottom (половина окна VS Code) или center. */
+            dock: function (side) {
+                var vp = viewport();
+                if (side === "left") geom = { x: 0, y: 0, w: vp.w / 2, h: vp.h };
+                else if (side === "right") geom = { x: vp.w / 2, y: 0, w: vp.w / 2, h: vp.h };
+                else if (side === "top") geom = { x: 0, y: 0, w: vp.w, h: vp.h / 2 };
+                else if (side === "bottom") geom = { x: 0, y: vp.h / 2, w: vp.w, h: vp.h / 2 };
+                else geom = { x: (vp.w - geom.w) / 2, y: (vp.h - geom.h) / 3, w: geom.w, h: geom.h };
+                commit();
+                return win;
+            },
+            geometry: function () { return { x: geom.x, y: geom.y, w: geom.w, h: geom.h }; },
+            onClose: function (fn) { if (typeof fn === "function") closers.push(fn); return win; },
+            close: function () {
+                if (!WINS[key]) return;
+                delete WINS[key];
+                win.hide();
+                closers.splice(0).forEach(function (fn) { try { fn(); } catch (e) { report("модуль " + mod + ": окно", e); } });
+            },
+        };
+        close.addEventListener("click", function () { if (o.closeHides) win.hide(); else win.close(); });
+        WINS[key] = win;
+        (modDispose[mod] = modDispose[mod] || []).push(function () { win.close(); });
+        if (o.show !== false) win.show();
+        return win;
+    }
+
+    function closeModuleWindows(mod) {
+        Object.keys(WINS).forEach(function (k) { if (k.indexOf(mod + "/") === 0) WINS[k].close(); });
+    }
+
+    // ---------------------------------------------------------------------------
+    //  Общая шина модулей одного окна: mc.share("accent", "#89b4fa") в одном модуле и
+    //  mc.shared("accent", fn) в другом. Значение — JSON (до 64 КБ), у каждого ключа есть автор
+    //  (id модуля): подписчик получает (value, from). Выключенный модуль забирает свои значения.
+    //  Договорённости о ключах — в types/mooncore.d.ts (SharedKeys).
+    // ---------------------------------------------------------------------------
+    var SHARED = {};         // key -> { value, from }
+    var sharedSubs = {};     // key -> [fn]
+    var SHARED_KEY_RE = /^[a-z][\w.-]{0,63}$/i;
+    var SHARED_MAX = 65536;
+
+    function sharedFire(key) {
+        var rec = SHARED[key];
+        (sharedSubs[key] || []).slice().forEach(function (fn) {
+            try { fn(rec ? JSON.parse(JSON.stringify(rec.value)) : undefined, rec ? rec.from : ""); } catch (e) { report("общая шина: " + key, e); }
+        });
+    }
+
+    /** Записать значение (undefined — убрать). true — принято. */
+    function shareValue(from, key, value) {
+        if (!SHARED_KEY_RE.test(String(key))) return false;
+        if (value === undefined) {
+            if (!SHARED[key]) return true;
+            delete SHARED[key];
+            sharedFire(key);
+            return true;
+        }
+        var text;
+        try { text = JSON.stringify(value); } catch (e) { return false; }
+        if (text === undefined || text.length > SHARED_MAX) return false;
+        if (SHARED[key] && SHARED[key].from === from && JSON.stringify(SHARED[key].value) === text) return true;
+        SHARED[key] = { value: JSON.parse(text), from: from };
+        sharedFire(key);
+        return true;
+    }
+
+    /** Подписка: fn(value, from). Текущее значение — сразу (асинхронно). Возвращает отписку. */
+    function sharedOn(key, fn) {
+        if (!SHARED_KEY_RE.test(String(key)) || typeof fn !== "function") return function () {};
+        var list = (sharedSubs[key] = sharedSubs[key] || []);
+        list.push(fn);
+        if (SHARED[key]) setTimeout(function () {
+            var rec = SHARED[key];
+            if (rec && list.indexOf(fn) !== -1) { try { fn(JSON.parse(JSON.stringify(rec.value)), rec.from); } catch (e) { report("общая шина: " + key, e); } }
+        }, 0);
+        return function () { var i = list.indexOf(fn); if (i !== -1) list.splice(i, 1); };
+    }
+
+    function sharedGet(key) {
+        var rec = SHARED[key];
+        return rec ? { value: JSON.parse(JSON.stringify(rec.value)), from: rec.from } : undefined;
+    }
+
+    /** Модуль выключен — его значения уходят (подписчики получают undefined). */
+    function sharedDrop(from) {
+        Object.keys(SHARED).forEach(function (k) { if (SHARED[k].from === from) { delete SHARED[k]; sharedFire(k); } });
+    }
+
+    // ---------------------------------------------------------------------------
     //  Старт и самолечение.
     // ---------------------------------------------------------------------------
     function whenWorkbench(cb) {
@@ -1612,10 +2135,13 @@
     }
 
     applyState(parse(readSync(BOOT.stateUrl)) || BOOT.state || null);
+    stage("state");
 
     whenWorkbench(function () {
         domReady = true;
+        stage("workbench");
         render(false);
+        stage("snippets");
         afterDS();
         // VS Code перерисовывает статусбар и титлбар — свои кнопки возвращаем на место.
         setInterval(function () { try { ensureButtons(); } catch (e) {} }, 1500);
@@ -1663,8 +2189,9 @@
                 function () { if (++tries < 4) setTimeout(send, 5000); });
         })();
     }
-    if (document.readyState === "complete") setTimeout(bootOk, 4000);
-    else window.addEventListener("load", function () { setTimeout(bootOk, 4000); });
+    function onLoaded() { stage("load"); scheduleLazy(); setTimeout(bootOk, 4000); }
+    if (document.readyState === "complete") onLoaded();
+    else window.addEventListener("load", onLoaded);
 
     window.__MOONCORE__ = {
         version: BOOT.version || "",
@@ -1703,6 +2230,12 @@
         fail: function (id, e) { report("выполнение", e, id); },
         /** Помощник модуля (null — модуль не впечатан). */
         module: moduleApi,
+        /** Загрузить ленивый (или снова включить выключенный) модуль: Promise<boolean>. */
+        loadModule: function (id) { return loadModule(String(id)); },
+        /** Состояние модуля: { loaded, off, lazy } или null. */
+        moduleState: function (id) { var m = MODS[id]; return m ? { loaded: !!m.loaded, off: !!m.off, lazy: !!m.lazy } : null; },
+        /** Общая шина модулей — только чтение (сниппеты и отладка). */
+        shared: { get: function (k) { return sharedGet(k); }, on: function (k, fn) { return sharedOn(k, fn); } },
         info: function () {
             return {
                 rev: rev, domReady: domReady,

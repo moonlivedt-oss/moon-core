@@ -1,6 +1,8 @@
     var BOOT = window.__MOONCORE_BOOT__ || {};
-    var T0 = (window.performance && performance.now) ? performance.now() : 0;
     function now() { return (window.performance && performance.now) ? performance.now() : Date.now(); }
+    // Та же шкала, что у now(): без performance было T0 = 0 при now() = Date.now() — время старта
+    // выходило «с 1970 года».
+    var T0 = now();
 
     // ---------------------------------------------------------------------------
     //  Защита запуска. Каждый запуск помечается «идёт» (n+1) и «последний модуль» (last); когда
@@ -18,7 +20,16 @@
     var skipAll = guard.n >= 3 && !guard.last, skipOne = guard.n >= 1 ? guard.last : "", skipped = [];
     function saveGuard() { try { localStorage.setItem(GUARD_KEY, JSON.stringify(guard)); } catch (e) {} }
     guard.n = skipAll ? 0 : guard.n + 1; guard.last = ""; saveGuard();
-    var timing = { runtime: 0, modules: {}, skipped: skipped, failed: [] };
+    var timing = { runtime: 0, modules: {}, skipped: skipped, failed: [], stages: {} };
+    /**
+     * Этап старта окна: мс от начала рантайма (в Доктор) и performance.mark «mooncore:<этап>»
+     * (видно во вкладке Performance DevTools). Каждый этап — один раз, первое достижение.
+     */
+    function stage(name) {
+        if (timing.stages[name] != null) return;
+        timing.stages[name] = Math.round((now() - T0) * 10) / 10;
+        try { if (window.performance && performance.mark) performance.mark("mooncore:" + name); } catch (e) {}
+    }
     var modRan = {};   // файл модуля начал выполняться (его первая строка зовёт _skip)
     var PROTO = BOOT.proto || { VERSION: 1, MAX_SNIPPET: 262144, MAX_SNIPPETS: 200, MAX_LOG: 4000, RPC_TIMEOUT_MS: 8000 };
     var NONCE = (document.currentScript && document.currentScript.nonce) || "";

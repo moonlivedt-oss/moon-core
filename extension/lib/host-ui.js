@@ -15,8 +15,11 @@ const crypto = require("crypto");
 const CMD = require("./commands");
 const D = require("./design");
 const { log } = require("./log");
+const KEYS = require("./keys");
+const AU = require("./audit");
+const NP = require("./native-policy");
 
-const ALLOWED_STORE = "mooncore.allowedCommands";
+const ALLOWED_STORE = KEYS.ALLOWED_COMMANDS;
 const MOD_ID_RE = /^[a-z][a-z0-9-]{1,31}$/;
 const ITEM_ID_RE = /^[\w.-]{1,40}$/;
 const clip = (s, n) => String(s == null ? "" : s).replace(/[\u0000-\u001F]/g, " ").slice(0, n);
@@ -108,42 +111,50 @@ class UIPart {
         const id = String(body && body.id || "");
         if (!MOD_ID_RE.test(id) || !this.modules.has(id)) return { ok: false, error: "unknown module" };
         const op = String(body.op || "");
+        const name = (this.modules.known.get(id) || {}).name || id;
+        if (!this.nativeThrottle) this.nativeThrottle = new NP.Throttle();
+        const th = this.nativeThrottle;
         try {
             if (op === "statusItem") return this.nativeStatusItem(id, body);
             if (op === "notify") {
+                if (!th.notify(id)) return { ok: false, error: "слишком много уведомлений (не больше " + NP.NOTIFY_PER_MIN + " в минуту)" };
                 const kind = body.kind === "warning" ? "showWarningMessage" : body.kind === "error" ? "showErrorMessage" : "showInformationMessage";
                 const buttons = (Array.isArray(body.buttons) ? body.buttons : []).slice(0, 4).map((b) => clip(b, 40)).filter(Boolean);
-                const pick = await vscode.window[kind](clip(body.text, 1000), ...buttons);
-                return { ok: true, result: pick || null };
+                const show = () => vscode.window[kind](NP.signed(name, clip(body.text, 1000)), ...buttons).then((pick) => ({ ok: true, result: pick || null }));
+                // Без кнопок уведомление ничего не ждёт; с кнопками — это вопрос: один за раз.
+                return buttons.length ? th.ask(id, show) : show();
             }
             if (op === "quickPick") {
                 const items = (Array.isArray(body.items) ? body.items : []).slice(0, 500).map((x) => typeof x === "string"
                     ? { label: clip(x, 200) } : { label: clip(x && x.label, 200), description: clip(x && x.description, 200), detail: clip(x && x.detail, 300), value: x && x.value });
-                const pick = await vscode.window.showQuickPick(items, { placeHolder: clip(body.placeholder, 200), canPickMany: body.many === true });
-                if (!pick) return { ok: true, result: null };
-                const out = (x) => (x.value !== undefined ? x.value : x.label);
-                return { ok: true, result: Array.isArray(pick) ? pick.map(out) : out(pick) };
+                return th.ask(id, async () => {
+                    const pick = await vscode.window.showQuickPick(items, { title: NP.signed(name, "выбор"), placeHolder: clip(body.placeholder, 200), canPickMany: body.many === true });
+                    if (!pick) return { ok: true, result: null };
+                    const out = (x) => (x.value !== undefined ? x.value : x.label);
+                    return { ok: true, result: Array.isArray(pick) ? pick.map(out) : out(pick) };
+                });
             }
             if (op === "input") {
-                const v = await vscode.window.showInputBox({ prompt: clip(body.prompt, 300), value: clip(body.value, 2000), password: body.password === true });
-                return { ok: true, result: v === undefined ? null : v };
+                const secret = body.password === true;
+                return th.ask(id, async () => {
+                    const v = await vscode.window.showInputBox({ title: NP.signed(name, secret ? "просит секрет (это не VS Code)" : "ввод"), prompt: clip(body.prompt, 300), value: clip(body.value, 2000), password: secret });
+                    if (secret) AU.record(this.context.globalState, "native", name + ": ввод секрета", v === undefined ? "deny" : "allow").catch(() => {});
+                    return { ok: true, result: v === undefined ? null : v };
+                });
             }
-            if (op === "open") {
-                const p = String(body.path || "");
-                if (!path.isAbsolute(p)) return { ok: false, error: "нужен абсолютный путь" };
-                await vscode.window.showTextDocument(vscode.Uri.file(p), { preview: body.preview !== false });
-                return { ok: true };
-            }
+            if (op === "open") return this.nativeOpen(id, name, body);
             if (op === "config") {
                 const key = String(body.key || "");
                 if (!/^[A-Za-z][\w.-]{0,120}$/.test(key)) return { ok: false, error: "bad key" };
+                if (NP.secretKey(key)) return { ok: false, error: "настройка может хранить секрет — шлюз её не отдаёт" };
                 const v = vscode.workspace.getConfiguration().get(key);
                 let safe = null;
-                try { safe = v === undefined ? null : JSON.parse(JSON.stringify(v)); } catch (e) { safe = null; }
+                try { safe = v === undefined ? null : JSON.parse(JSON.stringify(NP.stripSecrets(v, key))); } catch (e) { safe = null; }
                 return { ok: true, result: safe };
             }
             if (op === "context") return { ok: true, result: this.ctxInfo() };
-            return { ok: false, error: "unknown op" };
+            const vs = await this.onNativeVs(id, name, op, body);
+            return vs || { ok: false, error: "unknown op" };
         } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
     }
 
@@ -169,8 +180,36 @@ class UIPart {
         if (b.hidden === true) it.hide(); else it.show();
         return { ok: true };
     }
+    /**
+     * Модуль открывает файл. Без вопроса — внутри папок проекта, самого модуля и хранилища Moon
+     * Core; остальное (ключи, конфиги в домашней папке) — после модального подтверждения.
+     */
+    async nativeOpen(id, name, body) {
+        const p = String(body.path || "");
+        if (!path.isAbsolute(p)) return { ok: false, error: "нужен абсолютный путь" };
+        const m = this.modules.known.get(id) || {};
+        const roots = (vscode.workspace.workspaceFolders || []).filter((f) => f.uri.scheme === "file").map((f) => f.uri.fsPath)
+            .concat([m.root, m.assets, this.context.globalStorageUri && this.context.globalStorageUri.fsPath]);
+        if (!NP.insideAny(p, roots)) {
+            const ok = await this.nativeThrottle.ask(id, () => vscode.window.showWarningMessage(
+                NP.signed(name, "хочет открыть файл вне проекта: " + clip(p, 300) + ". Открыть?"), { modal: true }, "Открыть"));
+            AU.record(this.context.globalState, "native", name + ": открыть " + clip(path.basename(p), 80), ok === "Открыть" ? "once" : "deny").catch(() => {});
+            if (ok !== "Открыть") return { ok: false, error: "открытие файла не разрешено" };
+        }
+        await vscode.window.showTextDocument(vscode.Uri.file(p), { preview: body.preview !== false });
+        return { ok: true };
+    }
+
+    /** Модули выключили — убрать их элементы статусбара и очереди вопросов. */
+    disposeNative(ids) {
+        if (!this.nativeItems) return;
+        const set = new Set(ids);
+        for (const [key, it] of this.nativeItems) {
+            if (set.has(key.split("/")[0])) { try { it.dispose(); } catch (e) {} this.nativeItems.delete(key); }
+        }
+    }
     nativeClick(modId, itemId) {
-        try { this.modules.publish(modId, "nativeClick", { item: itemId }, { scope: "window" }); } catch (e) { log("шлюз: клик", e); }
+        try { this.modules.publish(modId, "nativeClick", { item: itemId }, { scope: "window", cache: false }); } catch (e) { log("шлюз: клик", e); }
     }
 
     // ---------------- кнопки от других расширений ----------------
