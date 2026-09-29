@@ -92,15 +92,28 @@ declare namespace MoonCore {
 
     /** События VS Code для mc.vscode.on. Поля с пометкой «editor.read» приходят только с этим правом. */
     interface VsEvents {
-        editor: { file: string; lang: string; scheme: string; dirty: boolean; lines: number; /** editor.read */ path?: string } | null;
+        editor: { file: string; lang: string; scheme: string; /** расширение файла в нижнем регистре */ ext: string; dirty: boolean; lines: number; /** editor.read */ path?: string } | null;
         cursor: { line: number; col: number; selections: number; empty: boolean; /** editor.read */ word?: string; selection?: string; lineText?: string } | null;
         save: { file: string; lang: string; scheme: string; /** editor.read */ path?: string };
-        diagnostics: { errors: number; warnings: number; infos: number; /** editor.read */ items?: { line: number; col: number; severity: number; message: string; source: string }[] };
+        diagnostics: { /** в активном файле */ errors: number; warnings: number; infos: number; /** по всему проекту */ totalErrors: number; totalWarnings: number; /** editor.read */ items?: { line: number; col: number; severity: number; message: string; source: string }[] };
         debug: { active: boolean; name: string; type: string };
         terminal: { count: number; active: string };
         task: { running: string[] };
-        git: { branch: string; changes: number };
+        git: { branch: string; changes: number; /** «владелец/репо» из origin */ remote: string; /** первая папка проекта */ folder: string };
         theme: { kind: string; name: string };
+    }
+
+    /**
+     * Договорённости о ключах общей шины (mc.share / mc.shared). Ключ — «<id модуля>.<имя>»,
+     * пишет только этот модуль; остальные читают.
+     */
+    interface SharedKeys {
+        /** Акцент текущего фона MoonLight BG. */
+        "mlbg.accent": { hex: string; rgb: [number, number, number] };
+        /** Текущий набор фона. */
+        "mlbg.set": { index: number; name: string };
+        /** Окно документации C++ открыто и какая статья в нём. */
+        "cppdocs.view": { open: boolean; title: string };
     }
 
     /** Стиль подсветки кода: только #hex-цвета и значения из списков. */

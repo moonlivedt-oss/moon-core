@@ -83,7 +83,8 @@ class VsPart {
         const doc = ed && ed.document;
         const fileOf = (d) => (d ? { file: path.basename(d.fileName || d.uri.path || ""), lang: d.languageId, scheme: d.uri.scheme } : null);
         if (kind === "editor") {
-            return { data: doc ? Object.assign(fileOf(doc), { dirty: doc.isDirty, lines: doc.lineCount }) : null, full: withFull && doc ? { path: doc.uri.scheme === "file" ? doc.uri.fsPath : doc.uri.toString() } : null };
+            const ext = doc ? path.extname(doc.fileName || doc.uri.path || "").replace(".", "").toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 16) : "";
+            return { data: doc ? Object.assign(fileOf(doc), { ext: ext, dirty: doc.isDirty, lines: doc.lineCount }) : null, full: withFull && doc ? { path: doc.uri.scheme === "file" ? doc.uri.fsPath : doc.uri.toString() } : null };
         }
         if (kind === "save") return this.vsSaved ? { data: fileOf(this.vsSaved), full: withFull ? { path: this.vsSaved.uri.fsPath } : null } : null;
         if (kind === "cursor") {
@@ -98,8 +99,16 @@ class VsPart {
             const list = doc ? vscode.languages.getDiagnostics(doc.uri) : [];
             const S = vscode.DiagnosticSeverity;
             const count = (s) => list.filter((d) => d.severity === s).length;
+            // Итог по всему проекту (как счётчик в статусбаре VS Code): ошибки в других файлах тоже.
+            let totalErrors = 0, totalWarnings = 0;
+            try {
+                vscode.languages.getDiagnostics().forEach((pair) => (pair[1] || []).forEach((d) => {
+                    if (d.severity === S.Error) totalErrors++;
+                    else if (d.severity === S.Warning) totalWarnings++;
+                }));
+            } catch (e) {}
             return {
-                data: { errors: count(S.Error), warnings: count(S.Warning), infos: count(S.Information) + count(S.Hint) },
+                data: { errors: count(S.Error), warnings: count(S.Warning), infos: count(S.Information) + count(S.Hint), totalErrors: totalErrors, totalWarnings: totalWarnings },
                 full: withFull ? { items: list.slice(0, 50).map((d) => ({ line: d.range.start.line, col: d.range.start.character, severity: d.severity, message: String(d.message).slice(0, 300), source: String(d.source || "").slice(0, 60) })) } : null,
             };
         }
@@ -116,14 +125,19 @@ class VsPart {
         }
         if (kind === "git") {
             const c = this.contextNow();
-            let changes = 0;
+            let changes = 0, remote = "";
             try {
                 const ext = vscode.extensions.getExtension("vscode.git");
                 const api = ext && ext.isActive ? ext.exports.getAPI(1) : null;
-                const repo = api && api.repositories[0];
-                if (repo) changes = repo.state.workingTreeChanges.length + repo.state.indexChanges.length;
+                // Репозиторий активного файла (как ветка в contextNow), иначе первый.
+                const repo = api && ((doc && doc.uri.scheme === "file" && api.getRepository(doc.uri)) || api.repositories[0]);
+                if (repo) {
+                    changes = repo.state.workingTreeChanges.length + repo.state.indexChanges.length;
+                    remote = VM.remoteShort(repo.state.remotes);
+                }
             } catch (e) {}
-            return { data: { branch: c.branch, changes: changes }, full: null };
+            const folder = (vscode.workspace.workspaceFolders || [])[0];
+            return { data: { branch: c.branch, changes: changes, remote: remote, folder: folder ? String(folder.name).slice(0, 120) : "" }, full: null };
         }
         if (kind === "theme") {
             return { data: { kind: this.contextNow().theme, name: String(vscode.workspace.getConfiguration("workbench").get("colorTheme") || "").slice(0, 80) }, full: null };

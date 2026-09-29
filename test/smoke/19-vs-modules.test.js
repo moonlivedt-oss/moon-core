@@ -54,7 +54,10 @@ function fakeVs(opts) {
             showInformationMessage: (...a) => { shown.push(a); return Promise.resolve(answers.shift()); },
             showQuickPick: (items) => { shown.push(["pick", items]); return Promise.resolve(o.pick ? o.pick(items) : undefined); },
         },
-        languages: { getDiagnostics: () => [{ severity: 0, message: "ошибка тут", source: "clangd", range: { start: { line: 1, character: 2 } } }, { severity: 1, message: "w", range: { start: { line: 0, character: 0 } } }] },
+        languages: { getDiagnostics: (uri) => {
+            const list = [{ severity: 0, message: "ошибка тут", source: "clangd", range: { start: { line: 1, character: 2 } } }, { severity: 1, message: "w", range: { start: { line: 0, character: 0 } } }];
+            return uri ? list : [[doc.uri, list], [{ fsPath: "other.cpp" }, [{ severity: 0 }, { severity: 0 }]]];
+        } },
         debug: { activeDebugSession: null },
         tasks: { taskExecutions: [] },
         extensions: { getExtension: () => undefined, all: [] },
@@ -161,7 +164,7 @@ test("события VS Code: только подписанным, full — пр
         assert.deepStrictEqual(cur[1].full, { word: "vector", selection: "std::vector<int>", lineText: "  std::vector<int> v;" });
         assert.deepStrictEqual(cur[1].readers, ["rd"]);
         const diag = sent.find((s) => s[1].kind === "diagnostics")[1];
-        assert.deepStrictEqual(diag.data, { errors: 1, warnings: 1, infos: 0 });
+        assert.deepStrictEqual(diag.data, { errors: 1, warnings: 1, infos: 0, totalErrors: 3, totalWarnings: 1 }, "в файле и по всему проекту");
         assert.strictEqual(diag.full.items[0].message, "ошибка тут");
         const n = sent.length;
         h.vsEmit("cursor");
@@ -170,7 +173,10 @@ test("события VS Code: только подписанным, full — пр
         h.vsSubs.get("cursor").forEach((v, k, m) => m.set(k, Date.now() - 1));
         assert.deepStrictEqual(h.vsSubscribers("cursor"), [], "без подтверждения подписка гаснет");
         ["editor", "terminal", "theme", "git", "debug", "task"].forEach((k) => assert.ok(h.vsSnapshot(k, true), k));
-        assert.deepStrictEqual(h.vsSnapshot("editor", false).data, { file: "main.cpp", lang: "cpp", scheme: "file", dirty: false, lines: 3 });
+        assert.deepStrictEqual(h.vsSnapshot("git", false).data, { branch: "main", changes: 0, remote: "", folder: "" });
+        assert.strictEqual(VM.remoteShort([{ name: "up", fetchUrl: "x" }, { name: "origin", fetchUrl: "https://user:tok@github.com/moonlivedt-oss/custom_VScode.git" }]), "moonlivedt-oss/custom_VScode", "origin, без логина и .git");
+        assert.strictEqual(VM.remoteShort([{ name: "origin", pushUrl: "git@github.com:a/b.git" }]), "a/b");
+        assert.deepStrictEqual(h.vsSnapshot("editor", false).data, { file: "main.cpp", lang: "cpp", scheme: "file", ext: "cpp", dirty: false, lines: 3 });
         assert.strictEqual(h.vsSnapshot("editor", false).full, null, "путь — только с правом");
     });
 });

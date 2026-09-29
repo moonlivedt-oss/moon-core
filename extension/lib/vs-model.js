@@ -97,6 +97,16 @@ const LAYOUT = {
     maximizedPanel: "workbench.action.toggleMaximizedPanel",
 };
 
+/** Короткое имя удалённого репозитория «владелец/репо» (origin или первый), без адреса и логина. */
+function remoteShort(remotes) {
+    const list = Array.isArray(remotes) ? remotes : [];
+    const r = list.filter((x) => x && x.name === "origin")[0] || list[0];
+    const url = r && (r.fetchUrl || r.pushUrl);
+    if (!url) return "";
+    const m = String(url).replace(/\.git$/, "").match(/[/:]([^/:@]+\/[^/:@]+)$/);
+    return m ? m[1].slice(0, 120) : "";
+}
+
 // ------------------------------------------------------------------ подсказки языкового сервера
 /** Содержимое hover (MarkdownString | MarkedString | string | {value}) -> простой текст. */
 function hoverText(hovers) {
@@ -123,4 +133,4 @@ function flatSymbols(list, depth, out) {
     return res;
 }
 
-module.exports = { KINDS, KIND_LIST, SUB_TTL_MS, MAX_SELECTION, MAX_DECO_TYPES, cleanKinds, cleanStyle, cleanRanges, LAYOUT, hoverText, flatSymbols };
+module.exports = { KINDS, KIND_LIST, SUB_TTL_MS, MAX_SELECTION, MAX_DECO_TYPES, cleanKinds, cleanStyle, cleanRanges, LAYOUT, hoverText, flatSymbols, remoteShort };
