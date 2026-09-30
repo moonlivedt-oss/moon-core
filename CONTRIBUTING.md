@@ -33,6 +33,33 @@ VS Code не трогается. Нужен, если меняешь внедр�
   Собранные `extension/runtime/mooncore-*.js` руками не правятся: `npm test` сверяет их с частями.
 - `test/smoke/*.test.js` — тесты по темам; `test/runtime/` — поведение рантайма в заглушке DOM.
 
+  | Файл | За что отвечает |
+  |---|---|
+  | `extension/extension.js` | точка входа: `activate()` регистрирует команды и связывает модули `lib/` |
+  | `extension/lib/inject/*.js`, `lib/wb-patch.js` | внедрение в оболочку: план записи с откатом, блокировка, права администратора |
+  | `extension/lib/host*.js`, `lib/bridge.js` | хост и мост «окно — расширение» |
+  | `extension/lib/engine.js`, `design.js`, `catalog.js` | конструктор: правки, проверка значений, каталог элементов |
+  | `extension/lib/history.js`, `backups.js`, `design-guard.js`, `host-safety.js` | страховки: отмена, копии вида, страж корня окна, безопасный режим |
+  | `extension/runtime/src/NN-*.js` | **исходники** рантайма окна по частям. Правь здесь, потом `npm run build` |
+  | `extension/runtime/mooncore-*.js` | **собранный** рантайм; руками не правится |
+  | `scripts/build-runtime.js`, `scripts/package-vsix.js` | сборка рантайма и `.vsix` |
+
+## Тесты
+
+Свой маленький ремень (`test/smoke/harness.js`), без Mocha/Jest и без зависимостей.
+
+| Команда | Что проверяет |
+|---|---|
+| `npm test` | собранный рантайм совпадает с частями, смоук `test/smoke/*.test.js` (заглушка `vscode`, поддельная установка VS Code), поведение рантайма окна `test/runtime/` (заглушка DOM, поддельные хосты) |
+| `node test/smoke.js` | только смоук |
+| `node test/runtime.js` | только рантайм окна |
+| `npm run e2e` | **настоящий VS Code** в отдельной копии: внедрение, работа в окне, снятие байт в байт |
+| `node test/serve.js` | стенд в браузере для ручной проверки |
+
+- Добавляешь фичу — добавь проверку: логика хоста — в профильный `test/smoke/NN-*.test.js`,
+  логика окна — в `test/runtime/*.test.js`.
+- Счётчики тестов живут в бейджах README и в записи CHANGELOG: поменялось число — поправь там.
+
 ## Правила
 
 - Страж структуры (`test/smoke/11-structure.test.js`): всё парсится, файл не длиннее 400 строк,
@@ -45,6 +72,28 @@ VS Code не трогается. Нужен, если меняешь внедр�
   Новый метод моста — в `extension/lib/protocol.js`, с лимитами.
 - Новая возможность — запись в `CHANGELOG.md` (раздел Unreleased) и проверка в тестах.
 
+## Сборка пакета
+
+```bash
+npm run package          # dist/moon-core-<версия>.vsix
+code --install-extension dist/moon-core-<версия>.vsix
+```
+
+Версия берётся из `extension/package.json`. Перед релизом подними её там, в корневом
+`package.json` и в бейджах README (оба языка), а раздел Unreleased в CHANGELOG переименуй в
+номер версии с датой.
+
 ## Pull request
 
-Шаблон PR подскажет чек-лист. Небольшие PR по одной теме смотрятся быстрее.
+1. Ветка от `main`, понятное имя.
+2. `npm test` — зелёный; трогал внедрение в оболочку — ещё и `npm run e2e`.
+3. Опиши, что и зачем; если менял UI — приложи скриншот.
+4. Видимый текст — по-русски, без эмодзи.
+
+Шаблон PR подскажет чек-лист. Небольшие PR по одной теме смотрятся быстрее. CI прогонит
+`npm test` на Windows и Linux и соберёт `.vsix`.
+
+## Вопросы
+
+Не уверен, как лучше — открой [Discussion](https://github.com/moonlivedt-oss/moon-core/discussions)
+или черновой PR. Небольшие правки (опечатки, доки) можно слать сразу.
