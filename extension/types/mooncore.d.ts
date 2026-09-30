@@ -250,6 +250,8 @@ declare namespace MoonCore {
         startDesign(): void;
         stopDesign(): void;
         stopPick(): void;
+        /** «Стоп-кран»: выключить (true) или включить (false) все стили Moon Core в этом окне; без аргумента — переключить. */
+        panic(on?: boolean): boolean;
         /** Состояние рантайма для отладки (DevTools). */
         info(): {
             rev: string;

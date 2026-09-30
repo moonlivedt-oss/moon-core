@@ -19,6 +19,7 @@
 const fs = require("fs");
 const { writeAtomic } = require("./storage");
 const { validateSetting, SETTINGS } = require("./catalog");
+const G = require("./design-guard");
 
 // Свойства, которые конструктор умеет менять. Этот же список (без регэкспов) уходит в окно.
 const PROPS = {
@@ -34,6 +35,16 @@ const PROPS = {
     padding:    { css: "padding", type: "number", unit: "px", min: 0, max: 40, step: 1, label: "Внутренний отступ", group: "size" },
     width:      { css: "width", type: "number", unit: "px", min: 0, max: 2000, step: 1, label: "Ширина", group: "risky" },
     height:     { css: "height", type: "number", unit: "px", min: 0, max: 2000, step: 1, label: "Высота", group: "risky" },
+    margin:     { css: "margin", type: "number", unit: "px", min: 0, max: 40, step: 1, label: "Внешний отступ", group: "size" },
+    borderWidth: { css: "border-width", type: "number", unit: "px", min: 0, max: 8, step: 1, label: "Рамка: толщина", group: "view", extra: "border-style: solid !important" },
+    borderColor: { css: "border-color", type: "color", label: "Рамка: цвет", group: "view" },
+    // tpl — шаблон значения: число подставляется вместо «%» (значение в CSS — не просто число с единицей).
+    shadow:     { css: "box-shadow", type: "number", tpl: "0 4px %px rgba(0, 0, 0, .45)", min: 0, max: 60, step: 2, label: "Тень", group: "view" },
+    blur:       { css: "backdrop-filter", type: "number", tpl: "blur(%px)", min: 0, max: 40, step: 1, label: "Размытие под элементом", group: "view" },
+    grayscale:  { css: "filter", type: "number", tpl: "grayscale(%)", min: 0, max: 1, step: 0.1, label: "Обесцветить", group: "view" },
+    letterSpacing: { css: "letter-spacing", type: "number", unit: "px", min: -2, max: 10, step: 0.5, label: "Межбуквенный интервал", group: "text" },
+    lineHeight: { css: "line-height", type: "number", min: 0.8, max: 3, step: 0.05, label: "Высота строки", group: "text" },
+    textTransform: { css: "text-transform", type: "enum", options: ["none", "uppercase", "lowercase", "capitalize"], label: "Регистр", group: "text" },
     // Плавающий элемент: откреплён от раскладки и лежит поверх окна там, куда его поставили.
     float:      { css: "position", type: "flag", value: "fixed", label: "Плавающее окно", group: "float",
                   extra: "z-index: 40 !important; box-shadow: 0 12px 40px rgba(0,0,0,.45) !important; border-radius: 8px !important; overflow: auto !important" },
@@ -76,6 +87,11 @@ const FX_SPEC = {
     cursorGlow:      { type: "bool", label: "Свечение курсора" },
     color:           { type: "color", label: "Цвет эффектов" },
     intensity:       { type: "number", min: 1, max: 10, step: 1, label: "Сила" },
+    // Вид интерфейса целиком (не редактора): рисуются стилем, без холста.
+    uiFont:          { type: "font", label: "Шрифт интерфейса" },
+    roundedUi:       { type: "number", min: 1, max: 12, step: 1, label: "Скругление интерфейса" },
+    smoothUi:        { type: "bool", label: "Плавные переходы" },
+    dimInactive:     { type: "bool", label: "Приглушать неактивные редакторы" },
 };
 
 /** "wb:statusBar.background" / "tk:comments" — ключ цвета; "" если недопустим. */
@@ -126,6 +142,7 @@ function cleanFxValue(k, v) {
     if (f.type === "bool") return v === true ? true : undefined;
     if (f.type === "color") return cleanColor(v);
     if (f.type === "number") return typeof v === "number" && isFinite(v) && v >= f.min && v <= f.max ? Math.round(v) : undefined;
+    if (f.type === "font") return typeof v === "string" && FONT_RE.test(v.trim()) && balanced(v.trim()) ? v.trim() : undefined;
     return undefined;
 }
 function cleanFx(fx) {
@@ -221,6 +238,11 @@ function cleanValue(prop, value) {
 function readDesign(file) {
     let o;
     try { o = JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { return emptyDesign(); }
+    return cleanDesign(o);
+}
+
+/** Проверенный вид из произвольного объекта (файл правок, резервная копия, шаг истории). */
+function cleanDesign(o) {
     const d = emptyDesign();
     if (o && o.rules && typeof o.rules === "object") {
         Object.keys(o.rules).slice(0, MAX_RULES).forEach((sel) => {
@@ -229,9 +251,10 @@ function readDesign(file) {
             // и весь хост при загрузке правок.
             if (!s || !r || !r.props || typeof r.props !== "object" || Array.isArray(r.props)) return;
             const props = {};
-            Object.keys(r.props).forEach((k) => { const v = cleanValue(k, r.props[k]); if (v !== undefined) props[k] = v; });
+            Object.keys(r.props).forEach((k) => { const v = cleanValue(k, r.props[k]); if (v !== undefined && !G.risky(s, k, v)) props[k] = v; });
             if (!Object.keys(props).length) return;
             d.rules[s] = { label: cleanLabel(r.label), props: props, ts: Number(r.ts) || 0 };
+            if (r.off === true) d.rules[s].off = true;                  // правило выключено, но не удалено
             const fp = cleanFp(r.fp);
             if (fp) d.rules[s].fp = fp;
         });
@@ -265,6 +288,7 @@ function writeDesign(file, d) { writeAtomic(file, JSON.stringify(d, null, 2)); }
  *   {op:"clearRules"}
  *   {op:"renameRule", from, to, fp?}          селектор перестал работать — правило переезжает на новый
  *   {op:"fingerprint", selector, fp}          запомнить отпечаток элемента у существующего правила
+ *   {op:"toggleRule", selector, off}          выключить правило, не удаляя (off: true), или включить
  * У set можно передать fp: он запоминается, если у правила отпечатка ещё нет.
  * Операции с настройками (setting/undoSetting) выполняет хост — ему нужен vscode.
  */
@@ -281,6 +305,11 @@ function applyCssOps(d, ops) {
             return;
         }
         if (!sel) return;
+        if (o.op === "toggleRule") {
+            const r = d.rules[sel];
+            if (r && !!r.off !== (o.off === true)) { if (o.off === true) r.off = true; else delete r.off; changed++; }
+            return;
+        }
         if (o.op === "resetRule") { if (d.rules[sel]) { delete d.rules[sel]; changed++; } return; }
         if (o.op !== "set" || !Object.prototype.hasOwnProperty.call(PROPS, o.prop)) return;
         const rule = d.rules[sel];
@@ -293,7 +322,7 @@ function applyCssOps(d, ops) {
             return;
         }
         const v = cleanValue(o.prop, o.value);
-        if (v === undefined) return;
+        if (v === undefined || G.risky(sel, o.prop, v)) return;      // корень окна не прячем (design-guard.js)
         if (!rule) {
             if (Object.keys(d.rules).length >= MAX_RULES) return;
             d.rules[sel] = { label: cleanLabel(o.label), props: {}, ts: Date.now() };
@@ -338,13 +367,13 @@ function recordSetting(d, key, value, prev, hadPrev, label) {
 function cssValue(prop, v) {
     const p = PROPS[prop];
     if (p.type === "flag") return p.value;
-    if (p.type === "number") return v + (p.unit || "");
+    if (p.type === "number") return p.tpl ? p.tpl.replace("%", String(v)) : v + (p.unit || "");
     return String(v);
 }
 
 /** CSS из правил дизайна. Порядок — по времени создания, всё с !important (перебивает тему). */
 function buildCss(d) {
-    const sels = Object.keys(d.rules).sort((a, b) => (d.rules[a].ts - d.rules[b].ts) || a.localeCompare(b));
+    const sels = Object.keys(d.rules).filter((s) => !d.rules[s].off).sort((a, b) => (d.rules[a].ts - d.rules[b].ts) || a.localeCompare(b));
     return sels.map((sel) => {
         const r = d.rules[sel];
         const decl = Object.keys(r.props).filter((k) => PROPS[k]).map((k) => "  " + PROPS[k].css + ": " + cssValue(k, r.props[k]) + " !important;" + (PROPS[k].extra ? "\n  " + PROPS[k].extra + ";" : ""));
@@ -357,4 +386,4 @@ function propsSpec() { return JSON.parse(JSON.stringify(PROPS)); }
 
 module.exports = {
     FX_SPEC, TOKEN_GROUPS, BUTTON_ZONES, COLOR_CONF, cleanColorKey, cleanColor, colorTarget, cleanButton, cleanButtons, cleanFx, cleanFxValue, cleanColorValues,
-    PROPS, emptyDesign, cleanSelector, balanced, protoKey, cleanValue, cleanFp, readDesign, writeDesign, applyCssOps, renameRule, recordSetting, buildCss, propsSpec };
+    PROPS, emptyDesign, cleanSelector, balanced, protoKey, cleanValue, cleanFp, readDesign, cleanDesign, writeDesign, applyCssOps, renameRule, recordSetting, buildCss, propsSpec };

@@ -337,6 +337,8 @@ require("./runtime/lazy.test")(test, { makeWindow, baseBoot, tick, P });
 require("./runtime/startup.test")(test, { makeWindow, baseBoot, tick });
 // VS Code для модулей: события, команды, ленивые модули, окна, шина.
 require("./runtime/modules2.test")(test, { makeWindow, baseBoot, tick });
+// Страховки окна: безопасный режим, стоп-кран, падающие сниппеты, пульс, сообщения.
+require("./runtime/safety.test")(test, { makeWindow, baseBoot, tick, D });
 
 (async () => {
     for (const t of queue) {

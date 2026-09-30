@@ -31,7 +31,8 @@ module.exports = {
     status: SH.status, workbenchFiles: SH.workbenchFiles, moduleSet: SH.moduleSet, bootData: SH.bootData, appRootOf: SH.appRootOf,
     deepState: DPL.deepState, deepFiles: DPL.deepFiles,
     // запись
-    inject: FL.injectNow, remove: PL.remove, planInject: PL.planInject, planRemove: PL.planRemove, execPlan: PL.execPlan,
+    cleanLegacy: PL.cleanLegacy,
+    inject: FL.injectNow, injectShared: FL.injectShared, remove: PL.remove, planInject: PL.planInject, planRemove: PL.planRemove, execPlan: PL.execPlan,
     recoveryPath: EL.recoveryPath, writeRecovery: EL.writeRecovery,
     lazyUi: UF.lazyOn, uiChunk: UF.uiChunk,
 };

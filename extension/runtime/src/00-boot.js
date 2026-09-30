@@ -35,6 +35,15 @@
     var NONCE = (document.currentScript && document.currentScript.nonce) || "";
     var ID_RE = /^[A-Za-z0-9][\w.-]{0,63}\.(css|js)$/;
     var Z = 2147483000;
+    // Безопасный режим (флаг из состояния): сниппеты, правки и модули не работают.
+    var SAFE = false;
+    // Случайный id этого окна: по нему хост отличает окна в пульсе (метод моста "hello").
+    var WIN_ID = (function () {
+        var s = "";
+        try { var a = new Uint8Array(8); window.crypto.getRandomValues(a); for (var i = 0; i < a.length; i++) s += ("0" + a[i].toString(16)).slice(-2); } catch (e) { s = ""; }
+        while (s.length < 16) s += Math.floor(Math.random() * 16).toString(16);
+        return s;
+    })();
 
     // ---------------------------------------------------------------------------
     //  Файлы хранилища (только чтение) — через vscode-file://vscode-app/<путь>.
@@ -74,10 +83,25 @@
     //  Журнал: ошибки уходят в Output «Moon Core» (через мост), плюс консоль DevTools.
     // ---------------------------------------------------------------------------
     var _logCount = 0, _logWindow = 0;
+    // JS-сниппет, который падает без остановки (таймер, наблюдатель за DOM), тормозит окно и
+    // заваливает журнал. Больше CRASH_MAX ошибок за минуту — сниппет останавливается в этом
+    // окне до правки его кода (или перезагрузки окна).
+    var CRASH_MAX = 8, crashes = {}, crashed = {};
+    function crashGuard(id) {
+        var t = Date.now(), c = crashes[id];
+        if (!c || t - c.start > 60000) c = crashes[id] = { start: t, n: 0 };
+        if (++c.n <= CRASH_MAX || !running[id] || crashed[id] != null) return;
+        crashed[id] = running[id].code;
+        setTimeout(function () {
+            try { stopJs(id); } catch (e) {}
+            try { toast("Moon Core: сниппет " + id + " остановлен — он падает без остановки. Поправь код, он запустится снова.", "error"); } catch (e) {}
+        }, 0);
+    }
     function report(where, err, snippet) {
         try { console.error("[moon-core] " + where + ":", err); } catch (e) {}
         var now = Date.now();
         if (now - _logWindow > 60000) { _logWindow = now; _logCount = 0; }
+        if (snippet) crashGuard(snippet);
         if (++_logCount > 30) return;                         // цикл ошибок не завалит журнал
         rpcAny("log", {
             where: String(where).slice(0, 80),

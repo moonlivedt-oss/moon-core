@@ -18,6 +18,10 @@ const fs = require("fs");
 const D = require("./design");
 const C = require("./catalog");
 const { writeAtomic } = require("./storage");
+const G = require("./design-guard");
+const BK = require("./backups");
+const { History, restoreDesign } = require("./history");
+const EP = require("./engine-profiles");
 
 const NAME_RE = /^[\p{L}\p{N} _.()-]{1,40}$/u;
 const MAX_PROFILES = 30;
@@ -50,6 +54,7 @@ function snapshot(d) {
     Object.keys(d.rules).forEach((sel) => {
         rules[sel] = { label: d.rules[sel].label, props: Object.assign({}, d.rules[sel].props) };
         if (d.rules[sel].fp) rules[sel].fp = d.rules[sel].fp;
+        if (d.rules[sel].off) rules[sel].off = true;
     });
     const settings = {};
     Object.keys(d.settings).forEach((k) => { settings[k] = d.settings[k].value; });
@@ -69,6 +74,7 @@ function cleanProfile(p) {
     Object.keys(tmp.rules).forEach((sel) => {
         out.rules[sel] = { label: tmp.rules[sel].label, props: tmp.rules[sel].props };
         if (tmp.rules[sel].fp) out.rules[sel].fp = tmp.rules[sel].fp;
+        if (p.rules[sel] && p.rules[sel].off === true) out.rules[sel].off = true;
     });
     Object.keys(p.settings || {}).forEach((k) => { const v = C.validateSetting(k, p.settings[k]); if (v !== undefined) out.settings[k] = v; });
     out.colors = D.cleanColorValues(p.colors);
@@ -80,16 +86,24 @@ function cleanProfile(p) {
     return out;
 }
 
-function sameSnapshot(a, b) {
-    const norm = (s) => JSON.stringify({
-        rules: Object.keys(s.rules).sort().map((k) => [k, Object.keys(s.rules[k].props).sort().map((p) => [p, s.rules[k].props[p]])]),
+/** Отпечаток содержимого вида (без времени правок): для истории и сравнения с профилем. */
+function contentKey(d) { return normSnapshot(snapshot(d)); }
+
+function normSnapshot(s) {
+    return JSON.stringify({
+        rules: Object.keys(s.rules).sort().map((k) => [k, Object.keys(s.rules[k].props).sort().map((p) => [p, s.rules[k].props[p]]), s.rules[k].off ? 1 : 0]),
         settings: Object.keys(s.settings).sort().map((k) => [k, s.settings[k]]),
         colors: Object.keys(s.colors || {}).sort().map((k) => [k, s.colors[k]]),
         buttons: (s.buttons || []).map((b) => JSON.stringify(b)).sort(),
         fx: Object.keys(s.fx || {}).sort().map((k) => [k, s.fx[k]]),
     });
-    return norm(a) === norm(b);
 }
+function sameSnapshot(a, b) { return normSnapshot(a) === normSnapshot(b); }
+
+// Правки, которые попадают в историю «Отменить» (профили и отпечатки — нет).
+const EDIT_OPS = new Set(["toggleRule", "set", "resetRule", "clearRules", "renameRule", "setting", "undoSetting", "color", "button", "removeButton", "fx", "clearAll", "applyProfile", "restore"]);
+// Правки, перед которыми вид заменяется целиком: причина резервной копии.
+const BULK_OPS = { clearAll: "clear", applyProfile: "profile", restore: "restore" };
 
 class DesignEngine {
     /** opts: { designFile, profilesFile, config, log } */
@@ -98,11 +112,19 @@ class DesignEngine {
         this.log = opts.log || (() => {});
         this.design = D.emptyDesign();
         this.profiles = { active: "", list: {} };
+        this.history = new History((d) => contentKey(d));
+        this.history.load(opts.historyFile);
         this.load();
     }
 
     load() {
         this.design = D.readDesign(this.opts.designFile);
+        // Нечитаемый файл правок не затираем пустым видом: откладываем и берём последнюю копию.
+        if (BK.isCorrupt(this.opts.designFile)) {
+            const saved = BK.recover(this.opts.designFile, this.opts.backupDir, this.log);
+            if (saved) this.design = saved;
+            try { this.saveDesign(); } catch (e) { this.log("конструктор: запись после восстановления", e); }
+        }
         let o = null;
         try { o = JSON.parse(fs.readFileSync(this.opts.profilesFile, "utf8")); } catch (e) {}
         const list = {};
@@ -223,11 +245,28 @@ class DesignEngine {
         this.load();                        // другое окно могло поменять файлы
         const errors = [];
         const applied = [];                 // применённые профили — хост передаст модулям их часть
-        let changed = 0, profilesChanged = false;
-        for (const o of (Array.isArray(ops) ? ops.slice(0, 200) : [])) {
-            if (!o || typeof o !== "object") continue;
+        let changed = 0, profilesChanged = false, travelled = false;
+        const list = (Array.isArray(ops) ? ops.slice(0, 200) : []).filter((o) => o && typeof o === "object");
+        const before = JSON.stringify(this.design), beforeKey = contentKey(this.design);
+        const bulk = list.find((o) => BULK_OPS[o.op]);
+        if (bulk && this.opts.backupDir) { try { BK.save(this.opts.backupDir, this.design, BULK_OPS[bulk.op]); } catch (e) { this.log("резервная копия вида", e); } }
+        for (const o of list) {
             try {
-                if (o.op === "set" || o.op === "resetRule" || o.op === "clearRules" || o.op === "fingerprint") changed += D.applyCssOps(this.design, [o]);
+                if (o.op === "undo" || o.op === "redo") {
+                    const step = this.history.step(o.op, this.design);
+                    if (!step) { errors.push(o.op === "undo" ? "отменять нечего" : "возвращать нечего"); continue; }
+                    if (step.stale) { errors.push("вид изменили в другом окне — история отмены сброшена"); continue; }
+                    await restoreDesign(this, step.snap, errors);
+                    travelled = true; changed++;
+                } else if (o.op === "restore") {
+                    // Вид целиком из резервной копии: проходит ту же проверку, что файл правок.
+                    await restoreDesign(this, D.cleanDesign(o.design), errors);
+                    this.profiles.active = ""; profilesChanged = true; changed++;
+                } else if (o.op === "set" && G.risky(D.cleanSelector(o.selector), o.prop, D.cleanValue(o.prop, o.value))) {
+                    errors.push(G.risky(D.cleanSelector(o.selector), o.prop, D.cleanValue(o.prop, o.value)));
+                }
+                else if (EP.handles(o)) { const r = await EP.run(this, o, errors); changed += r.changed; if (r.profiles) profilesChanged = true; }
+                else if (o.op === "set" || o.op === "resetRule" || o.op === "clearRules" || o.op === "fingerprint" || o.op === "toggleRule") changed += D.applyCssOps(this.design, [o]);
                 else if (o.op === "renameRule") {
                     // Селектор сломался после обновления VS Code: правило переезжает и в правках,
                     // и во всех своих профилях, где оно есть (иначе профиль вернёт сломанное).
@@ -283,6 +322,7 @@ class DesignEngine {
                     Object.keys(p.rules).forEach((sel, i) => {
                         this.design.rules[sel] = { label: p.rules[sel].label, props: Object.assign({}, p.rules[sel].props), ts: now + i };
                         if (p.rules[sel].fp) this.design.rules[sel].fp = p.rules[sel].fp;
+                        if (p.rules[sel].off) this.design.rules[sel].off = true;
                     });
                     this.profiles.active = name;
                     profilesChanged = true;
@@ -309,6 +349,14 @@ class DesignEngine {
         }
         if (changed) this.saveDesign();
         if (profilesChanged) this.saveProfiles();
+        // История: один шаг на пачку правок; подряд идущие правки одного свойства сливаются.
+        if (!travelled && list.some((o) => EDIT_OPS.has(o.op))) {
+            const afterKey = contentKey(this.design);
+            // Сливаются только «ползунки» (число, цвет, строка одного свойства); галочки и переключатели — каждый свой шаг.
+            const one = list.length === 1 && ["set", "setting", "fx", "color"].indexOf(list[0].op) !== -1 && (typeof list[0].value === "number" || typeof list[0].value === "string") ? list[0] : null;
+            if (afterKey !== beforeKey) this.history.record(JSON.parse(before), afterKey, one ? one.op + "|" + (one.selector || one.key || "") + "|" + (one.prop || "") : "");
+        }
+        if (changed) this.history.save(this.opts.historyFile);
         return { ok: !errors.length, error: errors.join("; "), changed: changed + (profilesChanged ? 1 : 0), applied: applied };
     }
 
@@ -323,8 +371,9 @@ class DesignEngine {
             props: D.propsSpec(),
             settingsNow: settingsNow,
             profiles: this.summary(),
+            history: this.history.summary(),
         };
     }
 }
 
-module.exports = { DesignEngine, snapshot, cleanProfile, sameSnapshot, cleanName, cleanModules, MAX_PROFILES };
+module.exports = { DesignEngine, snapshot, cleanProfile, sameSnapshot, contentKey, cleanName, cleanModules, MAX_PROFILES };

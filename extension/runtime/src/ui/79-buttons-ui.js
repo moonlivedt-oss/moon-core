@@ -56,6 +56,7 @@
         is.addEventListener("change", function () { upd({ icon: is.value }); flushOps(); renderPanel(true); });
         r2.appendChild(is);
         card.appendChild(r2);
+        card.appendChild(iconPicker(b.icon, function (n) { upd({ icon: n }); flushOps(); renderPanel(true); }));
         var r3 = h("div", "mc-row");
         r3.appendChild(h("label", null, "Подпись"));
         var lt = h("input"); lt.type = "text"; lt.maxLength = 40; lt.value = b.label || ""; lt.placeholder = b.icon ? "только значок" : "текст";

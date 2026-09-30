@@ -191,6 +191,7 @@ function makeWindow(boot, storage, opts) {
         mc: w.__MOONCORE__, files,
         setFocus(v) { focused = v; },
         fireWindow(ev) { (winListeners[ev] || []).forEach((fn) => fn({})); },
+        fireKey(e) { (winListeners.keydown || []).forEach((fn) => fn(e)); },
         es(port) { return esList.filter((e) => e.url.indexOf("127.0.0.1:" + port + "/") !== -1).pop(); },
         styles() { return head.children.filter((c) => c.tagName === "STYLE"); },
     };

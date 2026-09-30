@@ -23,13 +23,19 @@
         });
         des.bar = h("div");
         des.bar.setAttribute("data-mooncore-ui", "design-bar");
-        des.bar.appendChild(h("span", null, "Конструктор: клик — выбрать, тяни за ручки рамки, Alt+клик — обычный клик"));
+        des.bar.title = "Тяни за ручки рамки — размер и масштаб. Shift+клик — добавить элемент к выбранным. Стрелка вверх — родитель, Delete — скрыть, Ctrl+Z — отменить, Esc — выйти.";
+        des.bar.appendChild(h("span", null, "Конструктор: клик — выбрать, Alt+клик — обычный клик"));
+        des.bar.appendChild(histButtons());
+        des.bar.appendChild(showHiddenButton());
         des.bar.appendChild(compareButton());
         des.bar.appendChild(btnPlain("Готово", stopDesign));
         document.body.appendChild(des.bar);
         des.panel = h("div");
         des.panel.setAttribute("data-mooncore-ui", "design");
+        des.panel.setAttribute("role", "dialog");
+        des.panel.setAttribute("aria-label", "Конструктор Moon Core");
         document.body.appendChild(des.panel);
+        restorePanel();
         makeHandles();
         window.addEventListener("mousemove", onDesMove, true);
         window.addEventListener("keydown", onDesKey, true);
@@ -71,10 +77,17 @@
         e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
         // Клик, которым закончилось перетаскивание ручки, — не выбор нового элемента.
         if (des.suppressClick) { if (e.type === "click") des.suppressClick = false; return; }
-        if (e.type === "click" && e.target && e.target.nodeType === 1) selectEl(e.target);
+        if (e.type === "click" && e.target && e.target.nodeType === 1) { if (e.shiftKey && des.sel) addToSelection(e.target); else selectEl(e.target); }
     }
     function onDesKey(e) {
-        if (!des || e.key !== "Escape") return;
+        if (!des) return;
+        if (e.key !== "Escape") {
+            // В полях панели клавиши — для текста; Alt оставлен самому VS Code.
+            if (e.altKey || (isOurUi(e.target) && /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName))) return;
+            var act = designHotkey(e);
+            if (act) { e.preventDefault(); e.stopPropagation(); act(); }
+            return;
+        }
         if (isOurUi(e.target) && /^(INPUT|SELECT)$/.test(e.target.tagName)) { e.target.blur(); e.preventDefault(); e.stopPropagation(); return; }
         e.preventDefault(); e.stopPropagation();
         if (des.selEl || des.sel) { des.selEl = null; des.sel = ""; des.entry = null; renderPanel(true); drawDesign(); }
@@ -106,6 +119,7 @@
     function selectEl(el) {
         var c = catalogFor(el);
         des.selEl = el;
+        des.multi = 1;
         des.entry = c ? c.entry : null;
         des.anchor = c ? c.anchor : null;
         // Однотипные элементы (many): по умолчанию — именно этот, «все такие» — кнопкой.
@@ -129,6 +143,7 @@
     }
     function makeDraggable(handle) {
         handle.style.cursor = "move";
+        handle.addEventListener("dblclick", function (e) { if (!e.target.closest("button")) resetPanelPlace(); });
         handle.addEventListener("mousedown", function (e) {
             if (e.target.closest("button")) return;
             e.preventDefault();
@@ -139,7 +154,10 @@
                 p.style.left = Math.max(0, Math.min(window.innerWidth - r.width, ev.clientX - dx)) + "px";
                 p.style.top = Math.max(0, Math.min(window.innerHeight - 40, ev.clientY - dy)) + "px";
             };
-            var up = function () { window.removeEventListener("mousemove", move, true); window.removeEventListener("mouseup", up, true); };
+            var up = function () {
+                window.removeEventListener("mousemove", move, true); window.removeEventListener("mouseup", up, true);
+                if (des && des.dragged) { var q = p.getBoundingClientRect(); rememberPanel({ left: q.left, top: q.top }); }
+            };
             window.addEventListener("mousemove", move, true);
             window.addEventListener("mouseup", up, true);
         });

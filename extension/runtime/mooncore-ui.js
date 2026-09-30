@@ -253,6 +253,25 @@
         "  background:var(--vscode-focusBorder,#89b4fa);color:var(--vscode-button-foreground,#11111b);box-shadow:0 6px 24px rgba(0,0,0,.35);}",
         "[data-mooncore-ui=design-bar] button{font:inherit;padding:3px 10px;border-radius:5px;border:1px solid currentColor;background:transparent;color:inherit;cursor:pointer;white-space:nowrap;}",
         "[data-mooncore-ui=design-bar]{max-width:calc(100vw - 24px);box-sizing:border-box;}",
+        "[data-mooncore-ui=design-bar] button:hover{background:color-mix(in srgb,currentColor 16%,transparent);}",
+        "[data-mooncore-ui=design] .mc-search{display:block;width:calc(100% - 24px);margin:8px 12px 0;padding:4px 8px!important;}",
+        "[data-mooncore-ui=design] .mc-btn:hover{background:color-mix(in srgb,var(--vscode-focusBorder,#89b4fa) 16%,transparent);}",
+        "[data-mooncore-ui=design] .mc-btn.pri:hover{filter:brightness(1.12);}",
+        "[data-mooncore-ui=design] .mc-tab:hover{opacity:1;}",
+        "[data-mooncore-ui=design] button:focus-visible,[data-mooncore-ui=design] input:focus-visible,[data-mooncore-ui=design] select:focus-visible,[data-mooncore-ui=design-bar] button:focus-visible{outline:1px solid var(--vscode-focusBorder,#89b4fa);outline-offset:1px;}",
+        "[data-mooncore-ui=design]::-webkit-scrollbar{width:8px;}",
+        "[data-mooncore-ui=design]::-webkit-scrollbar-thumb{border-radius:4px;background:color-mix(in srgb,var(--vscode-foreground,#cdd6f4) 22%,transparent);}",
+        "[data-mooncore-ui=design] .mc-swatches{display:flex;flex-wrap:wrap;gap:4px;margin:2px 0 6px;}",
+        "[data-mooncore-ui=design] .mc-sw{width:18px;height:18px;padding:0;border-radius:4px;border:1px solid var(--vscode-input-border,#45475a);cursor:pointer;}",
+        "[data-mooncore-ui=design] .mc-sw:hover{transform:scale(1.18);}",
+        "[data-mooncore-ui=design] .mc-card.off{opacity:.55;}",
+        "[data-mooncore-ui=design] .mc-icons{display:flex;flex-wrap:wrap;gap:3px;max-height:150px;overflow:auto;margin-bottom:4px;}",
+        "[data-mooncore-ui=design] .mc-ico{width:26px;height:26px;padding:0;border-radius:5px;border:1px solid transparent;background:none;color:inherit;cursor:pointer;display:flex;align-items:center;justify-content:center;}",
+        "[data-mooncore-ui=design] .mc-ico:hover,[data-mooncore-ui=design] .mc-ico.on{border-color:var(--vscode-focusBorder,#89b4fa);background:color-mix(in srgb,var(--vscode-focusBorder,#89b4fa) 14%,transparent);}",
+        "@keyframes mc-in{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}",
+        "@keyframes mc-bar-in{from{opacity:0;transform:translate(-50%,8px);}to{opacity:1;transform:translate(-50%,0);}}",
+        "@media (prefers-reduced-motion:no-preference){[data-mooncore-ui=design]{animation:mc-in .16s ease-out;}[data-mooncore-ui=design-bar]{animation:mc-bar-in .16s ease-out;}",
+        "  [data-mooncore-ui=design] .mc-btn,[data-mooncore-ui=design] .mc-tab,[data-mooncore-ui=design] .mc-x{transition:background-color .12s ease,opacity .12s ease,border-color .12s ease;}}",
     ].join("\n");
 
     function h(tag, cls, text) {
@@ -301,13 +320,19 @@
         });
         des.bar = h("div");
         des.bar.setAttribute("data-mooncore-ui", "design-bar");
-        des.bar.appendChild(h("span", null, "Конструктор: клик — выбрать, тяни за ручки рамки, Alt+клик — обычный клик"));
+        des.bar.title = "Тяни за ручки рамки — размер и масштаб. Shift+клик — добавить элемент к выбранным. Стрелка вверх — родитель, Delete — скрыть, Ctrl+Z — отменить, Esc — выйти.";
+        des.bar.appendChild(h("span", null, "Конструктор: клик — выбрать, Alt+клик — обычный клик"));
+        des.bar.appendChild(histButtons());
+        des.bar.appendChild(showHiddenButton());
         des.bar.appendChild(compareButton());
         des.bar.appendChild(btnPlain("Готово", stopDesign));
         document.body.appendChild(des.bar);
         des.panel = h("div");
         des.panel.setAttribute("data-mooncore-ui", "design");
+        des.panel.setAttribute("role", "dialog");
+        des.panel.setAttribute("aria-label", "Конструктор Moon Core");
         document.body.appendChild(des.panel);
+        restorePanel();
         makeHandles();
         window.addEventListener("mousemove", onDesMove, true);
         window.addEventListener("keydown", onDesKey, true);
@@ -349,10 +374,17 @@
         e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
         // Клик, которым закончилось перетаскивание ручки, — не выбор нового элемента.
         if (des.suppressClick) { if (e.type === "click") des.suppressClick = false; return; }
-        if (e.type === "click" && e.target && e.target.nodeType === 1) selectEl(e.target);
+        if (e.type === "click" && e.target && e.target.nodeType === 1) { if (e.shiftKey && des.sel) addToSelection(e.target); else selectEl(e.target); }
     }
     function onDesKey(e) {
-        if (!des || e.key !== "Escape") return;
+        if (!des) return;
+        if (e.key !== "Escape") {
+            // В полях панели клавиши — для текста; Alt оставлен самому VS Code.
+            if (e.altKey || (isOurUi(e.target) && /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName))) return;
+            var act = designHotkey(e);
+            if (act) { e.preventDefault(); e.stopPropagation(); act(); }
+            return;
+        }
         if (isOurUi(e.target) && /^(INPUT|SELECT)$/.test(e.target.tagName)) { e.target.blur(); e.preventDefault(); e.stopPropagation(); return; }
         e.preventDefault(); e.stopPropagation();
         if (des.selEl || des.sel) { des.selEl = null; des.sel = ""; des.entry = null; renderPanel(true); drawDesign(); }
@@ -384,6 +416,7 @@
     function selectEl(el) {
         var c = catalogFor(el);
         des.selEl = el;
+        des.multi = 1;
         des.entry = c ? c.entry : null;
         des.anchor = c ? c.anchor : null;
         // Однотипные элементы (many): по умолчанию — именно этот, «все такие» — кнопкой.
@@ -407,6 +440,7 @@
     }
     function makeDraggable(handle) {
         handle.style.cursor = "move";
+        handle.addEventListener("dblclick", function (e) { if (!e.target.closest("button")) resetPanelPlace(); });
         handle.addEventListener("mousedown", function (e) {
             if (e.target.closest("button")) return;
             e.preventDefault();
@@ -417,7 +451,10 @@
                 p.style.left = Math.max(0, Math.min(window.innerWidth - r.width, ev.clientX - dx)) + "px";
                 p.style.top = Math.max(0, Math.min(window.innerHeight - 40, ev.clientY - dy)) + "px";
             };
-            var up = function () { window.removeEventListener("mousemove", move, true); window.removeEventListener("mouseup", up, true); };
+            var up = function () {
+                window.removeEventListener("mousemove", move, true); window.removeEventListener("mouseup", up, true);
+                if (des && des.dragged) { var q = p.getBoundingClientRect(); rememberPanel({ left: q.left, top: q.top }); }
+            };
             window.addEventListener("mousemove", move, true);
             window.addEventListener("mouseup", up, true);
         });
@@ -450,17 +487,20 @@
         var scroll = des.panel.scrollTop;
         des.panel.textContent = "";
         var head = h("div", "mc-h");
-        head.appendChild(h("div", "mc-title", des.entry && des.anchor === des.selEl ? des.entry.label : des.selEl ? labelFor(des.selEl) : "Конструктор"));
+        head.appendChild(h("div", "mc-title", des.multi > 1 ? "Выбрано элементов: " + des.multi : des.entry && des.anchor === des.selEl ? des.entry.label : des.selEl ? labelFor(des.selEl) : "Конструктор"));
         head.appendChild(xBtn(true, stopDesign, "Закрыть конструктор"));
-        head.title = "Перетащи, чтобы подвинуть панель";
+        head.title = "Перетащи, чтобы подвинуть панель; двойной клик — вернуть на место";
         makeDraggable(head);
         des.panel.appendChild(head);
         var n = changesCount();
         var tabs = h("div", "mc-tabs");
+        tabs.setAttribute("role", "tablist");
         [["map", "Карта"], ["el", "Элемент"], ["changes", "Правки" + (n ? " " + n : "")], ["profiles", "Профили"], ["more", "Ещё"]].forEach(function (t) {
             var b = h("button", "mc-tab" + (des.tab === t[0] ? " on" : ""), t[1]);
             b.type = "button";
-            b.addEventListener("click", function () { des.tab = t[0]; des.confirmClear = false; des.confirm = ""; renderPanel(true); });
+            b.setAttribute("role", "tab");
+            b.setAttribute("aria-selected", des.tab === t[0] ? "true" : "false");
+            b.addEventListener("click", function () { des.tab = t[0]; des.confirmClear = false; des.confirm = ""; rememberPanel({ tab: t[0] }); renderPanel(true); });
             tabs.appendChild(b);
         });
         des.panel.appendChild(tabs);
@@ -470,6 +510,7 @@
         else if (des.tab === "more") renderMore();
         else renderElement();
         des.panel.scrollTop = scroll;
+        updateHist();
     }
 
     function section(title, note) {
@@ -502,14 +543,14 @@
         var inp = h("input", "mc-sel"); inp.type = "text"; inp.spellcheck = false; inp.value = sel;
         var cnt = h("div", "mc-count");
         var upd = function () {
-            var k = count(inp.value.trim());
+            var k = count(stripState(inp.value.trim()));
             cnt.textContent = k === Infinity ? "селектор с ошибкой" : k === 0 ? "сейчас ничего не находит" : "совпадений: " + k + (k > 1 ? " — правка коснётся всех" : "");
             cnt.className = "mc-count" + (k === Infinity || k === 0 ? " bad" : "");
         };
         inp.addEventListener("input", upd);
         inp.addEventListener("change", function () {
             var v = inp.value.trim();
-            if (v && count(v) !== Infinity) { des.sel = v; renderPanel(true); }
+            if (v && count(stripState(v)) !== Infinity) { des.sel = v; renderPanel(true); }
         });
         upd();
         tgt.appendChild(inp); tgt.appendChild(cnt);
@@ -535,9 +576,13 @@
         } else if (des.entry && des.entry.many && des.selEl) {
             nav.appendChild(btn("Только этот", "", function () { des.sel = selectorFor(des.selEl); renderPanel(true); }));
         }
+        similarButton(nav);
         if (nav.childNodes.length) tgt.appendChild(nav);
+        if (des.selEl) tgt.appendChild(h("div", "mc-note", "Shift+клик по другому элементу — править несколько сразу."));
+        quickSection(sel, label);
         orderSection();
         condSection();
+        stateSection();
         colorSection(label);
         floatSection();
 
@@ -564,11 +609,10 @@
             if (risky.some(function (k) { return DS.rules[sel] && DS.rules[sel].props[k] !== undefined; })) det.open = true;
             sec2.appendChild(det);
         }
-        if (DS.rules[sel]) {
-            var foot = h("div", "mc-btns"); foot.style.margin = "10px 12px 0";
-            foot.appendChild(btn("Сбросить этот элемент", "danger", function () { resetRule(sel); renderPanel(true); }));
-            des.panel.appendChild(foot);
-        }
+        var foot = h("div", "mc-btns"); foot.style.margin = "10px 12px 0";
+        clipButtons(sel, label, foot);
+        if (DS.rules[sel]) foot.appendChild(btn("Сбросить этот элемент", "danger", function () { resetRule(sel); renderPanel(true); }));
+        if (foot.childNodes.length) des.panel.appendChild(foot);
     }
 
     function computed(prop) {
@@ -625,6 +669,7 @@
             col.addEventListener("input", function () { setProp(sel, prop, col.value, label); mark(); });
             ctl.appendChild(col);
             ctl.appendChild(h("span", "mc-note", isSet ? cur : "как в теме"));
+            colorExtras(col, ctl, row);
         } else if (p.type === "enum") {
             var s = h("select");
             var o0 = h("option", null, "как в теме"); o0.value = ""; s.appendChild(o0);
@@ -677,6 +722,15 @@
                 numb.value = v; range.value = v; setSetting(s.key, v, label);
             });
             ctl.appendChild(range); ctl.appendChild(numb);
+        } else if (s.type === "font") {
+            var ft = h("input"); ft.type = "text"; ft.spellcheck = false; ft.value = typeof cur === "string" ? cur : ""; ft.placeholder = "как в VS Code";
+            ft.addEventListener("change", function () {
+                var fv = ft.value.trim();
+                if (!fv) { if (DS.settings[s.key]) { undoSetting(s.key); flushOps(); renderPanel(true); } return; }
+                if (!/^[A-Za-z0-9 _,'".-]{1,160}$/.test(fv)) { toast("Шрифт: латинские имена через запятую, например: Fira Code, Consolas, monospace", "warn"); return; }
+                setSetting(s.key, fv, label); flushOps();
+            });
+            ctl.appendChild(ft);
         }
         row.appendChild(xBtn(!!rec, function () { undoSetting(s.key); flushOps(); renderPanel(true); }, rec ? "Вернуть: " + fmtVal(rec.hadPrev ? rec.prev : undefined) : ""));
         return row;
@@ -720,6 +774,8 @@
 
     function renderMap() {
         des.panel.appendChild(h("div", "mc-note mc-pad", "Всё, что есть в окне VS Code. Галочка — показывать или нет, «Настроить» — размер, шрифт, цвет и настройки элемента. Скрытое возвращается здесь же."));
+        var rows = [], search = mapSearch(rows);
+        des.panel.appendChild(search.input);
         ZONES.forEach(function (z) {
             var entries = CATALOG.filter(function (e) { return e.zone === z.id; });
             if (!entries.length) return;
@@ -744,9 +800,12 @@
                 row.appendChild(go);
                 if (e.selector) hoverHighlight(row, e.selector, false);
                 sec.appendChild(row);
-                if (e.list && n > 0) sec.appendChild(renderList(e));
+                var sub = e.list && n > 0 ? sec.appendChild(renderList(e)) : null;
+                // Ищем по названию элемента, зоны и по названиям его настроек.
+                rows.push({ node: row, extra: sub, sec: sec, text: (e.label + " " + z.label + " " + (e.settings || []).map(function (s) { return s.label + " " + s.key; }).join(" ")).toLowerCase() });
             });
         });
+        if (des.mapQuery) search.apply();
     }
 
     /**
@@ -877,6 +936,7 @@
             }));
         }
         card.appendChild(bs);
+        if (name) profileExtras(card, name, deletable);
         return card;
     }
 
@@ -885,12 +945,13 @@
         flushOps();
         var seq = ++flushSeq;
         rpcFirst("design", { ops: [op] }, des && des.host).then(function (r) {
-            if (!r || r.ok === false) { toast("Moon Core: " + ((r && r.error) || "расширение не ответило")); }
+            if (!r || r.ok === false) { toast("Moon Core: " + ((r && r.error) || "расширение не ответило"), "warn"); }
             else if (done) toast(done);
             if (r && r.design && seq === flushSeq) {
                 DS = toDS(r.design);
                 if (r.settingsNow) SETNOW = r.settingsNow;
                 if (r.profiles) PROFILES = r.profiles;
+                if (r.history) HIST = r.history;
                 localEditAt = 0;
                 clearColorPreview();
                 afterDS();
@@ -911,6 +972,7 @@
             des.panel.appendChild(h("div", "mc-empty", "Изменений пока нет. Выбери элемент во вкладке «Элемент»."));
             return;
         }
+        changesSearch();
         var ckeys = Object.keys(DS.colors || {});
         if (ckeys.length) {
             var cc = h("div", "mc-card");
@@ -953,8 +1015,9 @@
         }
         sels.forEach(function (sel) {
             var r = DS.rules[sel];
-            var card = h("div", "mc-card");
-            card.appendChild(h("div", "mc-cap", (r.label || "элемент") + (condText(sel) ? " — " + condText(sel) : "")));
+            var card = h("div", "mc-card" + (r.off ? " off" : ""));
+            var st = splitState(sel).state;
+            card.appendChild(h("div", "mc-cap", (r.label || "элемент") + (condText(sel) ? " — " + condText(sel) : "") + (st ? " — :" + st : "") + (r.off ? " (выключено)" : "")));
             card.appendChild(h("code", null, sel));
             // Навёл — элементы правки обведены (скрытые на это время показаны).
             hoverHighlight(card, sel, true);
@@ -972,6 +1035,7 @@
             try { target = document.querySelector(sel); } catch (e) {}
             if (target && !(r.props.hide)) bs.appendChild(btn("Выбрать", "", function () { selectEl(target); }));
             else if (!target) bs.appendChild(h("span", "mc-note", "сейчас не на экране"));
+            bs.appendChild(btn(r.off ? "Включить" : "Выключить", "", function () { setRuleOff(sel, !r.off); renderPanel(true); }, "Правка остаётся в списке, но не применяется"));
             bs.appendChild(btn("Сбросить", "danger", function () { resetRule(sel); renderPanel(true); }));
             card.appendChild(bs);
             des.panel.appendChild(card);
@@ -1519,6 +1583,7 @@
         ctl.appendChild(col);
         ctl.appendChild(h("span", "mc-note", key.slice(3)));
         row.appendChild(ctl);
+        colorExtras(col, ctl, row);
         row.appendChild(xBtn(!!rec, function () { setColor(key, null, label, token); flushOps(); renderPanel(true); }, "Вернуть цвет темы"));
         return row;
     }
@@ -1600,6 +1665,7 @@
         is.addEventListener("change", function () { upd({ icon: is.value }); flushOps(); renderPanel(true); });
         r2.appendChild(is);
         card.appendChild(r2);
+        card.appendChild(iconPicker(b.icon, function (n) { upd({ icon: n }); flushOps(); renderPanel(true); }));
         var r3 = h("div", "mc-row");
         r3.appendChild(h("label", null, "Подпись"));
         var lt = h("input"); lt.type = "text"; lt.maxLength = 40; lt.value = b.label || ""; lt.placeholder = b.icon ? "только значок" : "текст";
@@ -1625,6 +1691,8 @@
     var FX_SETTINGS = ["editor.cursorSmoothCaretAnimation", "editor.cursorBlinking", "editor.cursorStyle", "editor.smoothScrolling", "editor.fontLigatures", "workbench.list.smoothScrolling"];
 
     function renderMore() {
+        lookSection();
+        allColorsSection();
         var sb = section("Свои кнопки", "Любая команда VS Code — кнопкой в статусбаре, титлбаре или над редактором. Команду выбираешь в списке VS Code.");
         var own = DS.buttons || [];
         if (!own.length) sb.appendChild(h("div", "mc-note", "Кнопок пока нет."));
@@ -1677,6 +1745,425 @@
         });
         sw.appendChild(bw);
         sw.appendChild(h("div", "mc-note", "Любой элемент можно и открепить прямо в этом окне: вкладка «Элемент», «Плавающее окно»."));
+    }
+
+    // ---- удобства конструктора: память панели, отмена и возврат, быстрые действия, перенос
+    //      стиля между элементами, вид интерфейса целиком (акцент, шрифт, скругление)
+
+    // Панель помнит, куда её поставили и какая вкладка была открыта (localStorage окна).
+    var PANEL_KEY = "mooncore.designPanel", PANEL_TABS = ["map", "el", "changes", "profiles", "more"];
+    function panelMemory() {
+        try { var o = JSON.parse(localStorage.getItem(PANEL_KEY) || "null"); return o && typeof o === "object" ? o : {}; } catch (e) { return {}; }
+    }
+    function rememberPanel(patch) {
+        try { localStorage.setItem(PANEL_KEY, JSON.stringify(Object.assign(panelMemory(), patch))); } catch (e) {}
+    }
+    function restorePanel() {
+        var m = panelMemory();
+        // «Элемент» без выбранного элемента пуст — с него не начинаем.
+        if (PANEL_TABS.indexOf(m.tab) !== -1 && m.tab !== "el") des.tab = m.tab;
+        if (typeof m.left === "number" && typeof m.top === "number" && m.left >= 0 && m.top >= 0 &&
+            m.left < window.innerWidth - 120 && m.top < window.innerHeight - 80) {
+            des.dragged = true;
+            Object.assign(des.panel.style, { right: "auto", left: Math.round(m.left) + "px", top: Math.round(m.top) + "px" });
+        }
+    }
+    /** Двойной клик по заголовку: панель возвращается на своё обычное место. */
+    function resetPanelPlace() {
+        if (!des || !des.panel) return;
+        des.dragged = false;
+        Object.assign(des.panel.style, { left: "auto", right: "12px", top: "44px" });
+        rememberPanel({ left: null, top: null });
+        placePanel();
+    }
+
+    // ---- отмена и возврат правок (историю ведёт хост: lib/history.js)
+    function historyOp(dir) {
+        profileOp({ op: dir === "redo" ? "redo" : "undo" }, dir === "redo" ? "Правка возвращена" : "Правка отменена");
+    }
+    function histButtons() {
+        var box = h("span"); box.style.display = "inline-flex"; box.style.gap = "4px";
+        des.undoBtn = btnPlain("Отменить", function () { historyOp("undo"); });
+        des.redoBtn = btnPlain("Вернуть", function () { historyOp("redo"); });
+        box.appendChild(des.undoBtn); box.appendChild(des.redoBtn);
+        updateHist();
+        return box;
+    }
+    function updateHist() {
+        if (!des || !des.undoBtn) return;
+        des.undoBtn.title = "Отменить последнюю правку (Ctrl+Z)" + (HIST.undo ? " — шагов: " + HIST.undo : "");
+        des.redoBtn.title = "Вернуть отменённую правку (Ctrl+Y)" + (HIST.redo ? " — шагов: " + HIST.redo : "");
+        des.redoBtn.style.opacity = HIST.redo ? "" : "0.55";
+    }
+
+    function curLabel() { return des.entry && des.anchor === des.selEl ? des.entry.label : des.selEl ? labelFor(des.selEl) : des.sel; }
+
+    /** Клавиши конструктора, кроме Esc: отмена и возврат, родитель и обратно, Delete — скрыть. */
+    function designHotkey(e) {
+        var mod = e.ctrlKey || e.metaKey, code = String(e.code || ""), key = String(e.key || "");
+        // По e.code: в русской раскладке клавиша Z даёт «я», а сочетание должно работать.
+        if (mod && !e.shiftKey && code === "KeyZ") return function () { historyOp("undo"); };
+        if (mod && (code === "KeyY" || (e.shiftKey && code === "KeyZ"))) return function () { historyOp("redo"); };
+        if (mod) return null;
+        if (key === "ArrowUp" && des.selEl) return selectParent;
+        if (key === "ArrowDown" && des.stack.length) return selectChild;
+        if (key === "Delete" && des.sel) return function () {
+            setProp(des.sel, "hide", true, curLabel());
+            renderPanel(true);
+            toast("Скрыто. Вернуть — Ctrl+Z или вкладка «Правки»");
+        };
+        return null;
+    }
+
+    // ---- быстрые действия и перенос стиля
+    function quickSection(sel, label) {
+        var sec = section("Быстро");
+        var props = function () { return (DS.rules[sel] && DS.rules[sel].props) || {}; };
+        var bump = function (prop, delta, base) {
+            var p = PROPS[prop]; if (!p) return;
+            var cur = props()[prop]; if (cur === undefined) cur = base;
+            setProp(sel, prop, Math.min(p.max, Math.max(p.min, Math.round((cur + delta) * 100) / 100)), label);
+            renderPanel(true);
+        };
+        var bs = h("div", "mc-btns"); bs.style.marginTop = "0";
+        bs.appendChild(btn(props().hide ? "Показать" : "Скрыть", "", function () { setProp(sel, "hide", props().hide ? null : true, label); renderPanel(true); }, "Клавиша Delete делает то же"));
+        bs.appendChild(btn("Крупнее", "", function () { bump("zoom", 10, 100); }));
+        bs.appendChild(btn("Мельче", "", function () { bump("zoom", -10, 100); }));
+        bs.appendChild(btn("Прозрачнее", "", function () { bump("opacity", -0.15, 1); }));
+        sec.appendChild(bs);
+    }
+
+    var styleClip = null;
+    // Место и порядок — свойства конкретного элемента, с ними стиль не переносится.
+    var CLIP_SKIP = { order: 1, float: 1, floatX: 1, floatY: 1, floatW: 1, floatH: 1, hide: 1 };
+    function clipButtons(sel, label, box) {
+        var props = DS.rules[sel] && DS.rules[sel].props;
+        var keys = props ? Object.keys(props).filter(function (k) { return !CLIP_SKIP[k] && PROPS[k]; }) : [];
+        if (keys.length) box.appendChild(btn("Скопировать стиль", "", function () {
+            styleClip = {};
+            keys.forEach(function (k) { styleClip[k] = props[k]; });
+            toast("Стиль скопирован: выбери другой элемент и нажми «Вставить стиль»");
+            renderPanel(true);
+        }, "Запомнить правки этого элемента, чтобы перенести на другой"));
+        if (styleClip) box.appendChild(btn("Вставить стиль (" + Object.keys(styleClip).length + ")", "", function () {
+            Object.keys(styleClip).forEach(function (k) { if (PROPS[k]) setProp(sel, k, styleClip[k], label); });
+            flushOps();
+            renderPanel(true);
+        }));
+    }
+
+    // ---- вид интерфейса целиком
+    // Акцент — цвета темы, которыми VS Code красит фокус, кнопки, значки и активные вкладки.
+    var ACCENT_KEYS = ["focusBorder", "button.background", "activityBarBadge.background", "activityBar.activeBorder", "panelTitle.activeBorder",
+        "tab.activeBorderTop", "progressBar.background", "textLink.foreground", "badge.background", "statusBarItem.remoteBackground"];
+    var ACCENT_FG = ["button.foreground", "activityBarBadge.foreground", "badge.foreground", "statusBarItem.remoteForeground"];
+    var ACCENT_LABEL = "Акцент";
+    function accentNow() { var r = DS.colors && DS.colors["wb:focusBorder"]; return r && r.label === ACCENT_LABEL ? r.value : ""; }
+    function setAccent(value) {
+        var c = value ? rgba(value) : null;
+        // Текст на акцентном фоне — тёмный или светлый, по яркости фона.
+        var fg = c ? ((0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) > 150 ? "#11111b" : "#ffffff") : null;
+        ACCENT_KEYS.forEach(function (id) { setColor("wb:" + id, value, ACCENT_LABEL, id.replace(/\./g, "-")); });
+        ACCENT_FG.forEach(function (id) { setColor("wb:" + id, fg, ACCENT_LABEL, id.replace(/\./g, "-")); });
+    }
+
+    function lookSection() {
+        var f = fxConf();
+        var sec = section("Вид интерфейса", "Весь интерфейс разом. Акцент пишется в цвета темы VS Code (переживает обновления), остальное — стилем Moon Core.");
+        var row = function (title, isSet) { var r = h("div", "mc-row" + (isSet ? " set" : "")); r.appendChild(h("label", null, title)); var c = h("div", "mc-ctl"); r.appendChild(c); sec.appendChild(r); return { row: r, ctl: c }; };
+
+        var acc = accentNow(), ra = row("Акцентный цвет", !!acc);
+        var col = h("input"); col.type = "color"; col.value = acc || hex6(themeVars().focusBorder || "#89b4fa");
+        col.addEventListener("input", function () { setAccent(col.value); ra.row.className = "mc-row set"; });
+        col.addEventListener("change", function () { flushOps(); });
+        ra.ctl.appendChild(col);
+        ra.ctl.appendChild(h("span", "mc-note", acc || "как в теме"));
+        colorExtras(col, ra.ctl, ra.row);
+        ra.row.appendChild(xBtn(!!acc, function () { setAccent(null); flushOps(); renderPanel(true); }, "Вернуть цвета темы"));
+
+        var rf = row("Шрифт интерфейса", !!f.uiFont);
+        var t = h("input"); t.type = "text"; t.value = f.uiFont || ""; t.placeholder = "как в VS Code"; t.spellcheck = false;
+        t.title = "Имена шрифтов через запятую, например: Inter, Segoe UI, sans-serif. Код и терминал не меняются.";
+        t.addEventListener("change", function () {
+            var v = t.value.trim();
+            if (v && !/^[\w\s,'".-]{1,120}$/.test(v)) { toast("Шрифт: только буквы, цифры, пробелы, запятые и кавычки", "warn"); return; }
+            setFx("uiFont", v || null); flushOps(); renderPanel(true);
+        });
+        rf.ctl.appendChild(t);
+        rf.row.appendChild(xBtn(!!f.uiFont, function () { setFx("uiFont", null); flushOps(); renderPanel(true); }));
+
+        var rr = row("Скругление", !!f.roundedUi);
+        var rng = h("input"); rng.type = "range"; rng.min = 0; rng.max = 12; rng.step = 1; rng.value = f.roundedUi || 0;
+        var note = h("span", "mc-note", f.roundedUi ? f.roundedUi + " px" : "как в теме");
+        rng.addEventListener("input", function () { var v = +rng.value; setFx("roundedUi", v >= 1 ? v : null); note.textContent = v >= 1 ? v + " px" : "как в теме"; });
+        rr.ctl.appendChild(rng); rr.ctl.appendChild(note);
+
+        [["smoothUi", "Плавные переходы"], ["dimInactive", "Приглушать неактивные редакторы"]].forEach(function (x) {
+            var r = row((FXSPEC[x[0]] && FXSPEC[x[0]].label) || x[1], !!f[x[0]]);
+            var cb = h("input"); cb.type = "checkbox"; cb.checked = !!f[x[0]];
+            cb.addEventListener("change", function () { setFx(x[0], cb.checked ? true : null); flushOps(); renderPanel(true); });
+            r.ctl.appendChild(cb);
+        });
+    }
+
+    // ---- поиск по карте: строки прячутся на месте, без перерисовки панели (поле не теряет фокус)
+    function mapSearch(rows) {
+        var inp = h("input", "mc-search"); inp.type = "text"; inp.placeholder = "Найти элемент или настройку…"; inp.spellcheck = false;
+        inp.value = des.mapQuery || "";
+        var apply = function () {
+            var q = inp.value.trim().toLowerCase();
+            des.mapQuery = inp.value;
+            var shown = [];
+            rows.forEach(function (r) {
+                var ok = !q || r.text.indexOf(q) !== -1;
+                r.node.style.display = ok ? "" : "none";
+                if (r.extra) r.extra.style.display = ok ? "" : "none";
+                if (ok && shown.indexOf(r.sec) === -1) shown.push(r.sec);
+            });
+            rows.forEach(function (r) { r.sec.style.display = shown.indexOf(r.sec) !== -1 ? "" : "none"; });
+        };
+        inp.addEventListener("input", apply);
+        return { input: inp, apply: apply };
+    }
+
+    // ---- инструменты конструктора: пипетка и палитра у полей цвета, правка «по состоянию»
+    //      (под мышью, в фокусе), выключение правила без удаления, части профиля, переименование
+
+    // Недавние цвета — в localStorage окна; рядом — основные цвета текущей темы.
+    var RECENT_KEY = "mooncore.recentColors", RECENT_MAX = 8;
+    var THEME_SWATCHES = ["focusBorder", "foreground", "editor-background", "sideBar-background", "button-background", "statusBar-background",
+        "errorForeground", "editorWarning-foreground", "textLink-foreground", "terminal-ansiGreen", "terminal-ansiBlue", "terminal-ansiMagenta"];
+    function recentColors() {
+        try {
+            var a = JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
+            return Array.isArray(a) ? a.filter(function (c) { return /^#[0-9a-f]{6}$/i.test(String(c)); }).slice(0, RECENT_MAX) : [];
+        } catch (e) { return []; }
+    }
+    function rememberColor(c) {
+        if (!/^#[0-9a-f]{6}$/i.test(String(c))) return;
+        c = c.toLowerCase();
+        try { localStorage.setItem(RECENT_KEY, JSON.stringify([c].concat(recentColors().filter(function (x) { return x.toLowerCase() !== c; })).slice(0, RECENT_MAX))); } catch (e) {}
+    }
+    function swatch(color, title, pick) {
+        var b = h("button", "mc-sw"); b.type = "button"; b.title = title + " " + color;
+        b.style.background = color;
+        b.addEventListener("click", function (e) { e.preventDefault(); pick(color); });
+        return b;
+    }
+    /**
+     * Дополнения к полю цвета col: кнопка пипетки (взять цвет с экрана) и кнопка палитры (недавние
+     * цвета и цвета темы). ctl — куда положить кнопки, row — строка, под которой раскрывается палитра.
+     * Поле получает обычное событие input — дальше работает его собственный обработчик.
+     */
+    function colorExtras(col, ctl, row) {
+        var set = function (c) { col.value = hex6(c); col.dispatchEvent(new Event("input", { bubbles: true })); col.dispatchEvent(new Event("change", { bubbles: true })); };
+        col.addEventListener("change", function () { rememberColor(col.value); });
+        if (typeof window.EyeDropper === "function") {
+            var eye = h("button", "mc-x", "◉"); eye.type = "button"; eye.title = "Пипетка: взять цвет с любого места экрана";
+            eye.addEventListener("click", function (e) {
+                e.preventDefault();
+                try { new window.EyeDropper().open().then(function (r) { if (r && r.sRGBHex) set(r.sRGBHex); }, function () {}); } catch (err) { toast("Пипетка цвета недоступна в этой версии VS Code", "warn"); }
+            });
+            ctl.appendChild(eye);
+        }
+        var pal = h("button", "mc-x", "▾"); pal.type = "button"; pal.title = "Недавние цвета и цвета темы";
+        var strip = null;
+        pal.addEventListener("click", function (e) {
+            e.preventDefault();
+            if (strip) { strip.remove(); strip = null; return; }
+            strip = h("div", "mc-swatches");
+            var vars = themeVars(), seen = {};
+            recentColors().forEach(function (c) { seen[c] = 1; strip.appendChild(swatch(c, "недавний", set)); });
+            THEME_SWATCHES.forEach(function (n) {
+                var c = vars[n] && rgba(vars[n]) ? hex6(vars[n]) : "";
+                if (!c || seen[c]) return;
+                seen[c] = 1;
+                strip.appendChild(swatch(c, "тема: " + tokenToId(n), set));
+            });
+            if (!strip.childNodes.length) strip.appendChild(h("span", "mc-note", "цветов пока нет"));
+            if (row.parentNode) row.parentNode.insertBefore(strip, row.nextSibling);
+        });
+        ctl.appendChild(pal);
+    }
+
+    // ---- состояние элемента: правка только под мышью, в фокусе или при нажатии
+    var STATE_RE = /:(hover|focus-within|active)$/;
+    var STATE_TITLES = [["", "Всегда"], ["hover", "Под мышью"], ["focus-within", "В фокусе"], ["active", "Пока нажат"]];
+    function splitState(sel) { var m = STATE_RE.exec(sel || ""); return m ? { base: sel.slice(0, m.index), state: m[1] } : { base: sel || "", state: "" }; }
+    /** Селектор без состояния — для подсчёта совпадений и отпечатка (под мышью сейчас никого нет). */
+    function stripState(sel) { return splitState(sel).base; }
+    function stateSection() {
+        var cur = splitState(des.sel);
+        var sec = section("Состояние", "Правки ниже сработают только в этом состоянии: например, кнопка ярче под мышью.");
+        var s = h("select");
+        STATE_TITLES.forEach(function (o) { var op = h("option", null, o[1]); op.value = o[0]; s.appendChild(op); });
+        s.value = cur.state;
+        s.addEventListener("change", function () { des.sel = cur.base + (s.value ? ":" + s.value : ""); renderPanel(true); });
+        var row = h("div", "mc-row"); row.appendChild(s);
+        sec.appendChild(row);
+    }
+
+    // ---- выключить правило, не удаляя
+    function setRuleOff(sel, off) {
+        var r = DS.rules[sel];
+        if (!r) return;
+        if (off) r.off = true; else delete r.off;
+        queueOp("toggle|" + sel, { op: "toggleRule", selector: sel, off: !!off });
+        renderDesignCss();
+    }
+
+    // ---- части профиля и переименование (карточка профиля во вкладке «Профили»)
+    var PROFILE_PARTS = [["rules", "Элементы"], ["settings", "Настройки"], ["colors", "Цвета"], ["fx", "Эффекты"], ["buttons", "Кнопки"]];
+    function profileExtras(card, name, own) {
+        var det = h("details");
+        det.appendChild(h("summary", null, own ? "Часть профиля, имя" : "Взять только часть"));
+        det.appendChild(h("div", "mc-note", "Добавить к текущему виду только выбранное — остальное не тронется, профиль не переключится."));
+        var bs = h("div", "mc-btns");
+        PROFILE_PARTS.forEach(function (p) {
+            bs.appendChild(btn(p[1], "", function () { profileOp({ op: "applyProfile", name: name, only: [p[0]] }, "Из профиля «" + name + "» взято: " + p[1].toLowerCase()); }));
+        });
+        det.appendChild(bs);
+        if (own) {
+            var line = h("div", "mc-row"); line.style.marginTop = "6px";
+            var inp = h("input"); inp.type = "text"; inp.value = name; inp.maxLength = 40;
+            var go = function () {
+                var to = inp.value.trim();
+                if (!to || to === name) return;
+                profileOp({ op: "renameProfile", from: name, to: to }, "Профиль переименован: «" + to + "»");
+            };
+            inp.addEventListener("keydown", function (ev) { if (ev.key === "Enter") { ev.preventDefault(); ev.stopPropagation(); go(); } });
+            line.appendChild(inp);
+            line.appendChild(btn("Переименовать", "", go));
+            det.appendChild(line);
+        }
+        card.appendChild(det);
+    }
+
+    // ---- то, что окно VS Code знает о себе само: все значки codicon и все цвета темы.
+    //      Списки берутся из загруженных стилей и переменных темы этой версии VS Code — руками не ведутся.
+
+    var codiconCache = null;
+    /** Имена всех значков codicon из стилей окна (отсортированы); пусто — запасной короткий список. */
+    function allCodicons() {
+        if (codiconCache) return codiconCache;
+        var out = {};
+        var walk = function (rules) {
+            for (var i = 0; rules && i < rules.length; i++) {
+                var r = rules[i];
+                if (r.cssRules && !r.selectorText) { walk(r.cssRules); continue; }
+                var st = r.selectorText;
+                if (!st || st.indexOf(".codicon-") === -1) continue;
+                var re = /\.codicon-([a-z0-9-]{1,40}):{1,2}before/g, m;
+                while ((m = re.exec(st))) out[m[1]] = 1;
+            }
+        };
+        try { Array.prototype.forEach.call(document.styleSheets || [], function (sh) { try { walk(sh.cssRules); } catch (e) {} }); } catch (e) {}
+        var list = Object.keys(out).sort();
+        codiconCache = list.length > 20 ? list : ICONS.slice();
+        return codiconCache;
+    }
+
+    /** Выбор значка: поиск по имени и сетка. pick(name) — выбранный значок. */
+    function iconPicker(current, pick) {
+        var det = h("details");
+        det.appendChild(h("summary", null, "Все значки VS Code"));
+        var inp = h("input", "mc-search"); inp.type = "text"; inp.placeholder = "Имя значка по-английски: git, debug, arrow…"; inp.spellcheck = false;
+        inp.style.margin = "0 0 6px"; inp.style.width = "100%";
+        var grid = h("div", "mc-icons"), note = h("div", "mc-note");
+        var draw = function () {
+            var q = inp.value.trim().toLowerCase(), all = allCodicons();
+            var list = q ? all.filter(function (n) { return n.indexOf(q) !== -1; }) : ICONS.filter(function (n) { return all.indexOf(n) !== -1; });
+            grid.textContent = "";
+            list.slice(0, 96).forEach(function (n) {
+                var b = h("button", "mc-ico" + (n === current ? " on" : "")); b.type = "button"; b.title = n;
+                b.appendChild(h("span", "codicon codicon-" + n));
+                b.addEventListener("click", function (e) { e.preventDefault(); pick(n); });
+                grid.appendChild(b);
+            });
+            note.textContent = q ? (list.length ? "найдено: " + list.length + (list.length > 96 ? ", показаны первые 96" : "") : "ничего не найдено") : "всего значков: " + all.length + " — начни вводить имя";
+        };
+        inp.addEventListener("input", draw);
+        det.addEventListener("toggle", function () { if (det.open && !grid.childNodes.length) draw(); });
+        det.appendChild(inp); det.appendChild(grid); det.appendChild(note);
+        return det;
+    }
+
+    // ---- выбор: несколько элементов сразу, похожие элементы, показать скрытое, поиск в правках
+    /** Shift+клик: добавить элемент к выбранным — правки пойдут на все (селекторы через запятую). */
+    function addToSelection(el) {
+        var add = selectorFor(el);
+        if (!add) return;
+        var parts = des.sel.split(/\s*,\s*/);
+        if (parts.indexOf(add) !== -1) { toast("Этот элемент уже выбран"); return; }
+        if ((des.sel + ", " + add).length > 560) { toast("Слишком много элементов для одной правки", "warn"); return; }
+        des.sel = des.sel + ", " + add;
+        des.multi = parts.length + 1;
+        des.entry = null; des.anchor = null;
+        des.tab = "el";
+        renderPanel(true);
+        highlight(des.sel, false);
+    }
+    /** Кнопка «Похожие (N)»: все элементы с тем же классом в той же части окна. */
+    function similarButton(nav) {
+        var el = des.selEl;
+        if (!el || des.multi > 1) return;
+        var cls = stableClasses(el)[0], part = el.closest ? el.closest(".part") : null;
+        if (!cls || !part) return;
+        var sel = segment(part).text + " ." + cssEsc(cls), n = count(sel);
+        if (n < 2 || n === Infinity || n > 200 || sel === des.sel) return;
+        nav.appendChild(btn("Похожие (" + n + ")", "", function () { des.sel = sel; des.entry = null; renderPanel(true); highlight(sel, false); }, "Все элементы с классом ." + cls + " в этой части окна"));
+    }
+    function showHiddenButton() {
+        var b = btnPlain("Скрытое", function () {
+            des.showHidden = !des.showHidden;
+            b.style.background = des.showHidden ? "color-mix(in srgb, currentColor 22%, transparent)" : "";
+            renderDesignCss();
+            toast(des.showHidden ? "Скрытые элементы показаны бледными — кликни, чтобы выбрать и вернуть" : "Скрытые элементы снова скрыты");
+        });
+        b.title = "Показать элементы, скрытые правками: их можно выбрать и вернуть";
+        return b;
+    }
+    /** Поиск по списку правок (появляется, когда правок много): карточки прячутся на месте. */
+    function changesSearch() {
+        if (Object.keys(DS.rules).length < 6) return;
+        var inp = h("input", "mc-search"); inp.type = "text"; inp.placeholder = "Найти правку: элемент, селектор, свойство…"; inp.spellcheck = false;
+        inp.value = des.changesQuery || "";
+        var apply = function () {
+            var q = inp.value.trim().toLowerCase();
+            des.changesQuery = inp.value;
+            Array.prototype.forEach.call(des.panel.querySelectorAll(".mc-card"), function (c) { c.style.display = !q || String(c.textContent).toLowerCase().indexOf(q) !== -1 ? "" : "none"; });
+        };
+        inp.addEventListener("input", apply);
+        des.panel.appendChild(inp);
+        if (des.changesQuery) setTimeout(apply, 0);
+    }
+
+    /**
+     * Секция «Любой цвет темы» во вкладке «Ещё»: поиск по всем цветам темы VS Code (их сотни) и
+     * правка найденного — в штатную workbench.colorCustomizations, как и остальные цвета темы.
+     */
+    function allColorsSection() {
+        var sec = section("Любой цвет темы", "Все цвета, которыми VS Code красит интерфейс. Начни вводить: statusBar, tab, sideBar, button, terminal…");
+        var inp = h("input", "mc-search"); inp.type = "text"; inp.placeholder = "Имя цвета: tab.activeBackground"; inp.spellcheck = false;
+        inp.style.margin = "0 0 6px"; inp.style.width = "100%";
+        inp.value = des.colorQuery || "";
+        var box = h("div"), note = h("div", "mc-note");
+        var draw = function () {
+            var q = inp.value.trim().toLowerCase().replace(/\./g, "-");
+            des.colorQuery = inp.value;
+            box.textContent = "";
+            if (q.length < 2) { note.textContent = "Изменённые цвета — во вкладке «Правки»."; return; }
+            var vars = themeVars();
+            var names = Object.keys(vars).filter(function (n) { return n.toLowerCase().indexOf(q) !== -1 && rgba(vars[n]); }).sort(function (a, b) { return a.length - b.length || (a < b ? -1 : 1); });
+            names.slice(0, 12).forEach(function (n) {
+                var id = tokenToId(n);
+                box.appendChild(colorRow("wb:" + id, id, n, "Цвет темы: " + id));
+            });
+            note.textContent = names.length ? "найдено: " + names.length + (names.length > 12 ? ", показаны первые 12 — уточни запрос" : "") : "такого цвета в этой теме нет";
+        };
+        inp.addEventListener("input", draw);
+        sec.appendChild(inp); sec.appendChild(box); sec.appendChild(note);
+        draw();
     }
     ({ startPick: startPick, stopPick: stopPick, toggleDesign: toggleDesign, startDesign: startDesign, stopDesign: stopDesign, renderPanel: renderPanel, clearColorPreview: clearColorPreview });
 //# sourceURL=mooncore-ui.js

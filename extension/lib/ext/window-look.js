@@ -36,6 +36,8 @@ async function deepCommand() {
           detail: "Модули и Moon Core получают настоящие сервисы окна VS Code (статусбар, редакторы, команды). Правит бандл воркбенча; бэкап и хэш — как у оболочки." },
         { label: "$(window) Главный процесс", key: "mainProcess", picked: c.get("mainProcess", false) === true,
           detail: "Прозрачность окна, «поверх всех окон», акрил/слюда Windows 11 и vibrancy macOS. Правит out/main.js (не входит в контрольные суммы)." },
+        { label: "$(browser) Стили внутри webview", key: "webviewStyles", picked: c.get("webviewStyles", false) === true,
+          detail: "CSS из сниппетов webview*.css — внутрь страниц расширений и превью Markdown. Правит основу webview (не входит в контрольные суммы). Создать сниппет — команда «Стили внутри webview»." },
     ];
     const picks = await vscode.window.showQuickPick(items, { canPickMany: true, placeHolder: "Глубокая интеграция: отметь, что включить (после — перезапуск VS Code). Снять всё — «Убрать из VS Code»" });
     if (!picks) return;

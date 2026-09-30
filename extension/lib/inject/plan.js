@@ -77,9 +77,17 @@ function planInject(context) {
         let next = W.applyBlock(html, block);
         if (next == null) return { ok: false, reason: "error", error: "в оболочке нет </head>: " + f };
         next = W.armCsp(next, nonce, old && old.nonce, tt, old && old.tt);
+        const bad = W.shellProblem(html, next);
+        if (bad) return { ok: false, reason: "error", error: "оболочка не записана — проверка перед записью: " + bad + " (" + path.basename(f) + ")" };
         // Бэкап — только чистого (без нашего блока) файла. После обновления VS Code в старом
         // бэкапе лежит оболочка прошлой сборки — заменяем её нынешней.
         if (!old && readOr(f + W.BAK_EXT) !== html) ops.push({ file: f + W.BAK_EXT, data: html });
+        // Первый бэкап мог быть снят с уже изменённого файла (в оболочке были чужие правки). Как только
+        // оболочка без нашего блока снова равна заводской (по исходному хэшу) — бэкап заменяется ею.
+        if (old) {
+            const bare = W.stripBlock(html), orig = SH.originalChecksum(f);
+            if (orig != null && W.productChecksum(Buffer.from(bare, "utf8")) === orig && readOr(f + W.BAK_EXT) !== bare) ops.push({ file: f + W.BAK_EXT, data: bare });
+        }
         if (next !== html) ops.push({ file: f, data: next, atomic: true });
         if (fixSum) {
             if (SH.shellTrust(context, f, next).trusted) SH.planChecksum(products, f, next);

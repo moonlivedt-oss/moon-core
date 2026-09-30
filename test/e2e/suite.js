@@ -17,6 +17,8 @@ const OUT = process.env.MOONCORE_E2E_OUT || "";
 const MOD = "e2e-probe";
 const LAZY = "e2e-lazy";
 
+const WVS = require("./webview-steps");
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function waitFor(fn, ms, every) {
     const until = Date.now() + ms;
@@ -56,6 +58,7 @@ exports.run = async function () {
         host.modules.setModules(moduleHost.allowed(context));
 
         if (PHASE === "inject") {
+            WVS.prepare(host);
             const r = inject.inject(context);
             step("внедрение", r.ok, { done: r.done, reason: r.reason || null, error: r.error || null });
             const st = inject.status(context);
@@ -79,6 +82,7 @@ exports.run = async function () {
             const key = W.checksumKey(df.out, df.bundle);
             step("хэш бандла в product.json пересчитан", W.checksumMatches(prodText, key, W.productChecksum(fs.readFileSync(df.bundle))) === true);
             step("бэкап бандла и main.js", fs.existsSync(df.bundle + ".mooncore-backup") && fs.existsSync(df.main + ".mooncore-backup"));
+            WVS.afterInject(step, ext, inject, context);
         }
 
         if (PHASE === "window") {
@@ -189,6 +193,7 @@ exports.run = async function () {
                 const list = DM.problems(snap);
                 step("доктор: страница открылась, поломок нет", DM.verdict(list) !== "error", list.map((p) => p.level + ": " + p.title));
             } catch (e) { step("доктор", false, String(e && e.stack || e)); }
+            try { await WVS.inWindow(step); } catch (e) { step("webview", false, String(e && e.stack || e)); }
 
             await host.onDesign({ ops: [{ op: "clearAll" }] });
             step("правки сброшены", !Object.keys(host.design.rules).length && !host.design.buttons.length);
@@ -201,6 +206,7 @@ exports.run = async function () {
             const df = inject.deepFiles();
             const bundleBak = fs.existsSync(df.bundle + ".mooncore-backup") ? fs.readFileSync(df.bundle + ".mooncore-backup", "utf8") : null;
             const mainBak = fs.existsSync(df.main + ".mooncore-backup") ? fs.readFileSync(df.main + ".mooncore-backup", "utf8") : null;
+            const wvBak = WVS.beforeRemove(inject);
             const r = inject.remove();
             step("снятие", r.ok, { done: r.done, error: r.error || null });
             const st = inject.status(context);
@@ -217,6 +223,7 @@ exports.run = async function () {
             }
             step("хэш сходится (VS Code не скажет «повреждена»)", st.every((s) => s.checksum !== false), st.map((s) => s.checksum));
             step("бандл воркбенча совпадает с исходным", bundleBak != null && fs.readFileSync(df.bundle, "utf8") === bundleBak);
+            WVS.afterRemove(step, ext, inject, wvBak);
             step("main.js совпадает с исходным, скрипта нет", mainBak != null && fs.readFileSync(df.main, "utf8") === mainBak && !fs.existsSync(df.mjs));
         }
     };

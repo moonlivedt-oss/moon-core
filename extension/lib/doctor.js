@@ -15,6 +15,7 @@ const os = require("os");
 const { log, showLog, recentLog, redact, logFilePath, flushFile } = require("./log");
 const PM = require("./ext/permissions");
 const { diagnosticLines } = require("./ext/status");
+const VU = require("./ext/vs-files-ui");
 
 let panel = null;
 
@@ -44,6 +45,10 @@ function snapshot(context, host, check) {
         recovery: inject.recoveryPath(context),
         errors: typeof host.errorTop === "function" ? host.errorTop(8) : [],
         permissions: PM.summary(context),
+        files: VU.filesSummary(false),
+        windows: typeof host.windowsInfo === "function" ? host.windowsInfo() : [],
+        safe: typeof host.safeMode === "function" ? host.safeMode() : false,
+        history: host.engine.history ? host.engine.history.summary() : { undo: 0, redo: 0 },
         logFile: logFilePath(),
     };
 }
@@ -59,7 +64,8 @@ function render(s, list, nonce, busy) {
         yes(x.injected, "внедрено", "не внедрено") + (x.injected ? ", рантайм " + yes(x.current, "актуален", "устарел") : "") +
         (x.checksum === true ? ", хэш сходится" : x.checksum === false ? ", " + yes(false, "", "хэш не сходится") : "") +
         (x.modules && x.modules.length ? "<br><small>модули в оболочке: " + esc(x.modules.join(", ")) + "</small>" : "") +
-        (x.deep ? "<br><small>сервисы окна: " + (x.deep.di ? "включены" : x.deep.diSupported ? "выключены" : "не поддерживаются") + ", главный процесс: " + (x.deep.main ? "включён" : "выключен") + "</small>" : ""))).join("");
+        (x.deep ? "<br><small>сервисы окна: " + (x.deep.di ? "включены" : x.deep.diSupported ? "выключены" : "не поддерживаются") + ", главный процесс: " + (x.deep.main ? "включён" : "выключен") +
+            ", стили webview: " + (x.deep.webview ? "вписаны" : x.deep.want && x.deep.want.webview ? (x.deep.webviewSupported === false ? "файл не тронут" : "нет сниппетов webview*.css") : "выключены") + "</small>" : ""))).join("");
     const b = s.bridge;
     const t = s.timing;
     const timing = t ? "рантайм " + esc(t.runtime) + " мс" + Object.keys(t.modules).map((k) => ", " + esc(k) + " " + esc(t.modules[k]) + " мс").join("") +
@@ -75,6 +81,14 @@ function render(s, list, nonce, busy) {
         (p.detail ? "<div class=pd>" + esc(p.detail) + "</div>" : "") +
         (p.fix ? "<button data-cmd='" + esc(p.fix) + "'>" + esc(p.fixLabel || "Починить") + "</button>" : "") + "</div>").join("")
         : "<div class='prob ok'><div class=pt>Проблем не найдено</div></div>";
+    const plan = DM.autoPlan(list);
+    const fixAll = plan.fixes.length + (plan.reload ? 1 : 0) >= 2 ? "<button data-cmd=fixAll title=\"По очереди: " + esc(plan.fixes.concat(plan.reload ? ["reload"] : []).join(", ")) + "\">Починить всё</button>" : "";
+    const wins = Array.isArray(s.windows) ? s.windows : [];
+    const fl = s.files;
+    const filesRow = !fl ? "" : row("Файлы VS Code", "проверено " + esc(fl.total) + ": исходных " + esc(fl.total - fl.foreign.length - fl.mooncore.length - fl.missing.length) +
+        ", изменено Moon Core " + esc(fl.mooncore.length) + (fl.foreign.length ? ", " + yes(false, "", "изменено не только Moon Core: " + fl.foreign.length) : "") +
+        "<br><small>основа webview: " + esc({ clean: "исходная", mooncore: "со стилями Moon Core", foreign: fl.webviewCspOff ? "защита CSP отключена другой программой" : "изменена другой программой", missing: "не найдена" }[fl.webview] || fl.webview) +
+        (fl.leftovers.length ? "; файлов других загрузчиков: " + esc(fl.leftovers.length) : "") + "</small>");
     return `<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
 <title>Moon Core: Доктор</title>
@@ -99,7 +113,7 @@ code,small{opacity:.75} ul{margin:0;padding-left:18px} .bar{display:flex;gap:8px
 <h1>Moon Core: Доктор</h1>
 <div class="verdict ${v}">${esc(head)}</div>
 <div class=bar>
-<button data-cmd=refresh class=sec>Обновить</button><button data-cmd=check class=sec>Проверить селекторы</button>
+${fixAll}<button data-cmd=refresh class=sec>Обновить</button><button data-cmd=check class=sec>Проверить селекторы</button>
 <button data-cmd=inject class=sec>Внедрить заново</button><button data-cmd=modules class=sec>Модули</button>
 <button data-cmd=moduleDev class=sec>Режим разработки</button><button data-cmd=log class=sec>Журнал</button>
 <button data-cmd=report class=sec title="Диагностика и последние строки журнала — без имени пользователя и токенов">Скопировать отчёт</button>
@@ -107,9 +121,11 @@ code,small{opacity:.75} ul{margin:0;padding-left:18px} .bar{display:flex;gap:8px
 </div>
 <h2>Что не так</h2>${probs}
 <h2>Оболочка VS Code</h2><table>${row("VS Code / Moon Core", esc(s.vscode) + " / " + esc(s.ext))}${shells}
+${filesRow}
 ${row("Аварийное восстановление", "<code>" + esc(s.recovery) + "</code> <button data-cmd=recovery class=sec>Показать</button>")}</table>
 <h2>Связь и запуск</h2><table>
 ${row("Мост", b.running ? "127.0.0.1:" + esc(b.port) + ", окон на связи: " + esc(b.streams) + ", запросов: " + esc(b.requests) : yes(false, "", "не поднят"))}
+${row("Окна", wins.length ? "на связи " + wins.length + (wins.some((w) => w.stale) ? ", " + yes(false, "", "со старым рантаймом: " + wins.filter((w) => w.stale).length) : ", рантайм у всех актуален") : "пульса ещё не было")}
 ${row("Время запуска окна", timing)}
 ${row("Ошибки окна", errs)}
 ${row("Запросы по методам", methods || "—")}${b.rejected || b.dropped ? row("Отклонено", "по лимиту " + esc(b.rejected || 0) + ", зависших окон отключено " + esc(b.dropped || 0)) : ""}
@@ -117,6 +133,7 @@ ${row("Проверка селекторов", esc(checkLine))}</table>
 <h2>Вид</h2><table>
 ${row("Конструктор", "правил " + s.design.rules + ", настроек VS Code " + s.design.settings + (s.design.active ? ", профиль «" + esc(s.design.active) + "»" + (s.design.dirty ? " (изменён)" : "") : ""))}
 ${row("Свои профили", esc(s.design.profiles))}
+${row("История и копии", "можно отменить шагов: " + esc(s.history ? s.history.undo : 0) + " <button data-cmd=backups class=sec>Резервные копии вида</button> <button data-cmd=gallery class=sec>Галерея стилей</button>")}
 ${row("Сниппеты", "включено " + s.snippets.on + " из " + s.snippets.total)}
 ${row("Разрешения", esc(s.permissions || "") + " <button data-cmd=permissions class=sec>Журнал разрешений</button>")}
 ${row("Файл журнала", "<code>" + esc(s.logFile || "выключен") + "</code>")}</table>
@@ -196,6 +213,7 @@ async function openDoctor(context, host) {
     panel.webview.onDidReceiveMessage(async (msg) => {
         const cmd = msg && DM.ACTIONS.indexOf(msg.cmd) !== -1 ? msg.cmd : "";
         try {
+            if (cmd === "refresh" || cmd === "inject" || cmd === "remove") VU.resetFilesSummary();
             if (cmd === "inject") await inject.injectCommand(context);
             else if (cmd === "remove") await inject.removeCommand(context);
             else if (cmd === "reload") await vscode.commands.executeCommand("workbench.action.reloadWindow");
@@ -208,6 +226,27 @@ async function openDoctor(context, host) {
             else if (cmd === "design") host.toggleDesign();
             else if (cmd === "jsReview") { host.jsAsked = new Set(); await host.askJsPending(); }
             else if (cmd === "permissions") await PM.showPermissions(context, host);
+            else if (cmd === "safe") await host.safeModeCommand();
+            else if (cmd === "legacy") {
+                try { inject.cleanLegacy(inject.status(context), context); VU.resetFilesSummary(); vscode.window.setStatusBarMessage("Moon Core: следы старого загрузчика убраны — значок-ведёрко исчезнет после перезагрузки окна", 5000); }
+                catch (e) { log("следы старого загрузчика", e); vscode.window.showWarningMessage("Moon Core: не удалось убрать метки (" + e.message + "). Если VS Code стоит в Program Files — помогут «Внедрить заново» с правами администратора."); }
+            }
+            else if (cmd === "backups") await host.restoreBackupCommand();
+            else if (cmd === "gallery") await vscode.commands.executeCommand("moonCore.gallery");
+            else if (cmd === "fixAll") {
+                const s0 = snapshot(context, host, lastCheck);
+                const plan = DM.autoPlan(DM.problems(s0));
+                for (const f of plan.fixes) {
+                    log("доктор: починить всё — " + f);
+                    if (f === "inject") await inject.injectCommand(context);
+                    else if (f === "heal" && lastCheck && lastCheck.heals.length) await host.offerHeals(lastCheck.heals);
+                    else if (f === "jsReview") { host.jsAsked = new Set(); await host.askJsPending(); }
+                }
+                if (plan.reload && !plan.fixes.includes("inject")) {
+                    const pick = await vscode.window.showInformationMessage("Moon Core: осталось перезагрузить окно.", "Перезагрузить окно");
+                    if (pick) await vscode.commands.executeCommand("workbench.action.reloadWindow");
+                }
+            }
             else if (cmd === "export") await exportDiagnostics(context, host, lastCheck);
             else if (cmd === "report") {
                 await vscode.env.clipboard.writeText(reportText(context, host, lastCheck));

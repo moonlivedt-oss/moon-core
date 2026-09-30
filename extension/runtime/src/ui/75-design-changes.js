@@ -63,6 +63,7 @@
             }));
         }
         card.appendChild(bs);
+        if (name) profileExtras(card, name, deletable);
         return card;
     }
 
@@ -71,12 +72,13 @@
         flushOps();
         var seq = ++flushSeq;
         rpcFirst("design", { ops: [op] }, des && des.host).then(function (r) {
-            if (!r || r.ok === false) { toast("Moon Core: " + ((r && r.error) || "расширение не ответило")); }
+            if (!r || r.ok === false) { toast("Moon Core: " + ((r && r.error) || "расширение не ответило"), "warn"); }
             else if (done) toast(done);
             if (r && r.design && seq === flushSeq) {
                 DS = toDS(r.design);
                 if (r.settingsNow) SETNOW = r.settingsNow;
                 if (r.profiles) PROFILES = r.profiles;
+                if (r.history) HIST = r.history;
                 localEditAt = 0;
                 clearColorPreview();
                 afterDS();
@@ -97,6 +99,7 @@
             des.panel.appendChild(h("div", "mc-empty", "Изменений пока нет. Выбери элемент во вкладке «Элемент»."));
             return;
         }
+        changesSearch();
         var ckeys = Object.keys(DS.colors || {});
         if (ckeys.length) {
             var cc = h("div", "mc-card");
@@ -139,8 +142,9 @@
         }
         sels.forEach(function (sel) {
             var r = DS.rules[sel];
-            var card = h("div", "mc-card");
-            card.appendChild(h("div", "mc-cap", (r.label || "элемент") + (condText(sel) ? " — " + condText(sel) : "")));
+            var card = h("div", "mc-card" + (r.off ? " off" : ""));
+            var st = splitState(sel).state;
+            card.appendChild(h("div", "mc-cap", (r.label || "элемент") + (condText(sel) ? " — " + condText(sel) : "") + (st ? " — :" + st : "") + (r.off ? " (выключено)" : "")));
             card.appendChild(h("code", null, sel));
             // Навёл — элементы правки обведены (скрытые на это время показаны).
             hoverHighlight(card, sel, true);
@@ -158,6 +162,7 @@
             try { target = document.querySelector(sel); } catch (e) {}
             if (target && !(r.props.hide)) bs.appendChild(btn("Выбрать", "", function () { selectEl(target); }));
             else if (!target) bs.appendChild(h("span", "mc-note", "сейчас не на экране"));
+            bs.appendChild(btn(r.off ? "Включить" : "Выключить", "", function () { setRuleOff(sel, !r.off); renderPanel(true); }, "Правка остаётся в списке, но не применяется"));
             bs.appendChild(btn("Сбросить", "danger", function () { resetRule(sel); renderPanel(true); }));
             card.appendChild(bs);
             des.panel.appendChild(card);

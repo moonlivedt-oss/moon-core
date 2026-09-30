@@ -10,6 +10,8 @@
     var FX_SETTINGS = ["editor.cursorSmoothCaretAnimation", "editor.cursorBlinking", "editor.cursorStyle", "editor.smoothScrolling", "editor.fontLigatures", "workbench.list.smoothScrolling"];
 
     function renderMore() {
+        lookSection();
+        allColorsSection();
         var sb = section("Свои кнопки", "Любая команда VS Code — кнопкой в статусбаре, титлбаре или над редактором. Команду выбираешь в списке VS Code.");
         var own = DS.buttons || [];
         if (!own.length) sb.appendChild(h("div", "mc-note", "Кнопок пока нет."));

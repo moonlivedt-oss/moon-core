@@ -105,6 +105,8 @@ function writeSettings(userData) {
         // Глубокая интеграция: крючок сервисов окна в бандле и главный процесс (вид окна).
         "moonCore.deepHooks": true,
         "moonCore.mainProcess": true,
+        // Стили внутри webview: сниппет webview*.css кладёт сама фаза (test/e2e/webview-steps.js).
+        "moonCore.webviewStyles": true,
         "moonCore.window": { opacity: 0.95, alwaysOnTop: false, material: "none" },
         "workbench.startupEditor": "none",
         "window.restoreWindows": "none",

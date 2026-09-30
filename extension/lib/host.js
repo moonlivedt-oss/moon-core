@@ -8,7 +8,8 @@
 //    host-context.js  — профили по контексту и профиль проекта;
 //    host-check.js    — проверка селекторов и самолечение правок;
 //    host-ui.js       — кнопки, контекст окна, шлюз к API VS Code для модулей, кнопки расширений;
-//    host-vs.js       — события VS Code для модулей, код, подсветка, части окна, команды модулей.
+//    host-vs.js       — события VS Code для модулей, код, подсветка, части окна, команды модулей;
+//    host-safety.js   — безопасный режим, резервные копии, отмена правок, пульс окон.
 // ============================================================
 "use strict";
 
@@ -22,7 +23,7 @@ const C = require("./catalog");
 const D = require("./design");
 const { DesignEngine } = require("./engine");
 const { ModuleHub } = require("./modules");
-const { modulesDataDir, storageDir, ensureDir, bridgeFile, stateFile, snippetsDir, metaFile, designFile, profilesFile } = require("./storage");
+const { backupsDir, modulesDataDir, storageDir, ensureDir, bridgeFile, stateFile, snippetsDir, metaFile, designFile, profilesFile } = require("./storage");
 const { safeWatch, statKey } = require("./fsx");
 
 const PICKED_ID = "picked.css";
@@ -40,6 +41,8 @@ class Host {
         this.engine = new DesignEngine({
             designFile: designFile(context),
             profilesFile: profilesFile(context),
+            backupDir: backupsDir(context),
+            historyFile: path.join(storageDir(context), "mooncore-history.json"),
             log: log,
             config: {
                 globalValue: (k) => { const i = vscode.workspace.getConfiguration().inspect(k); return i ? i.globalValue : undefined; },
@@ -75,11 +78,21 @@ class Host {
         const meta = S.readMeta(metaFile(this.context));
         this.list = S.listSnippets(this.dir, meta);
         this.engine.load();
-        const next = S.buildState(this.runnable(this.list), Object.assign(this.engine.stateExtra(this.settingsNow()), { uiButtons: this.uiList() }));
+        const extra = Object.assign(this.engine.stateExtra(this.settingsNow()), { uiButtons: this.uiList() });
+        // Безопасный режим: одобрение JS всё равно считается (runnable), но в окно ничего не уходит.
+        // Сниппеты webview*.css — не для окна: их CSS вписывается в основу webview при внедрении.
+        const run = this.runnable(this.list).filter((s) => !S.isWebview(s.id)), safe = this.safeMode();
+        const wvKey = this.list.filter((s) => S.isWebview(s.id)).map((s) => s.id + ":" + s.enabled + ":" + s.size + ":" + s.code.length).join("|");
+        if (this.webviewKey !== undefined && this.webviewKey !== wvKey && typeof this.onWebviewCss === "function") {
+            clearTimeout(this.webviewTimer);
+            this.webviewTimer = setTimeout(() => { try { this.onWebviewCss(); } catch (e) { log("стили webview", e); } }, 800);
+        }
+        this.webviewKey = wvKey;
+        const next = S.buildState(safe ? [] : run, safe ? this.safeExtra(extra) : extra);
         try { S.writeState(stateFile(this.context), next); } catch (e) { log("запись состояния", e); }
         const changed = next.rev !== this.state.rev;
         this.state = next;
-        if (changed) this.bridge.broadcast("state", next);
+        if (changed) this.bridge.broadcast("state", this.slimState(next));
         this._onChange.fire();
         this.scheduleSyncOut();
     }
@@ -168,6 +181,7 @@ class Host {
             uiClick: (b) => this.onUiClick(b),
             vsSubscribe: (b) => this.vsSubscribe(b),
             modCommands: (b) => this.modCommandsFromWindow(b),
+            hello: (b) => this.onHello(b),
             context: () => Object.assign({ ok: true }, this.ctxInfo()),
             uiFailed: (b) => typeof this.onUiFailed === "function" ? this.onUiFailed(b) : { ok: false, error: "нет обработчика" },
             // Код модуля отдаётся только в режиме разработки (его включает пользователь командой).
@@ -228,7 +242,11 @@ class Host {
 
     /** Правки конструктора: CSS-свойства элементов и настройки VS Code из каталога. */
     onDesign(body) {
-        const run = () => this.applyDesign(Array.isArray(body && body.ops) ? body.ops.slice(0, 200) : []);
+        // «Вид целиком» (restore) окну не положен: его шлёт только сам хост (резервные копии).
+        return this.designInternal((Array.isArray(body && body.ops) ? body.ops.slice(0, 200) : []).filter((o) => !o || o.op !== "restore"));
+    }
+    designInternal(ops) {
+        const run = () => this.applyDesign(ops);
         this.designQueue = this.designQueue.then(run, run);
         return this.designQueue;
     }
@@ -239,7 +257,7 @@ class Host {
         // Профиль несёт состояние модулей (фон vscode-bg и т.п.) — отдаём его окнам: каждый
         // модуль применит свою часть сам (помощник mc.profile в рантайме).
         (r.applied || []).forEach((a) => { if (Object.keys(a.modules).length) this.bridge.broadcast("profile", a); });
-        return { ok: r.ok, error: r.error, design: this.state.design, settingsNow: this.state.settingsNow, profiles: this.state.profiles, rev: this.state.rev };
+        return { ok: r.ok, error: r.error, design: this.state.design, settingsNow: this.state.settingsNow, profiles: this.state.profiles, history: this.state.history, rev: this.state.rev };
     }
 
     /** Быстрое переключение профиля вида (QuickPick). */
@@ -260,6 +278,10 @@ class Host {
     }
 
     toggleDesign() {
+        if (this.safeMode()) {
+            vscode.window.showWarningMessage("Moon Core: включён безопасный режим — правки конструктора сейчас не применяются.", "Выйти из безопасного режима").then((p) => { if (p) this.safeModeCommand(); });
+            return;
+        }
         if (!this.bridge.status().streams) {
             vscode.window.showWarningMessage("Moon Core: окно не подключено к мосту. Проверь, что рантайм внедрён (Moon Core: Диагностика).");
             return;
@@ -279,7 +301,7 @@ class Host {
     hostRef() { return { port: this.bridge.port, token: this.bridge.token }; }
 
     /** Какие модули разрешены сейчас: окно выключает остальные и включает вернувшиеся без перезагрузки. */
-    moduleSetInfo() { return { ids: Array.from(this.modules.known.keys()) }; }
+    moduleSetInfo() { return { ids: this.safeMode() ? [] : Array.from(this.modules.known.keys()) }; }
     broadcastModuleSet() { this.bridge.broadcast("moduleSet", this.moduleSetInfo()); if (this.updateCommandContext) this.updateCommandContext(); }
 
     focusInfo() { return { focused: !!(vscode.window.state && vscode.window.state.focused) }; }
@@ -297,7 +319,7 @@ class Host {
     dispose() {
         this.disposed = true;
         // Все отложенные дела частей хоста: после выгрузки они не должны трогать API VS Code.
-        ["rebuildTimer", "ctxTimer", "autoTimer", "syncTimer", "syncNotifyTimer"].forEach((k) => clearTimeout(this[k]));
+        ["rebuildTimer", "ctxTimer", "autoTimer", "syncTimer", "syncNotifyTimer", "webviewTimer"].forEach((k) => clearTimeout(this[k]));
         ["pollTimer", "timeTimer"].forEach((k) => clearInterval(this[k]));
         for (const res of this.pending.values()) { try { res(null); } catch (e) {} }
         this.pending.clear();
@@ -316,6 +338,6 @@ function mixin(target, part) {
         Object.defineProperty(target.prototype, k, Object.getOwnPropertyDescriptor(part.prototype, k));
     });
 }
-[require("./host-snippets"), require("./host-gate"), require("./host-transfer"), require("./host-context"), require("./host-check"), require("./host-ui"), require("./host-vs")].forEach((m) => mixin(Host, m.Part));
+[require("./host-snippets"), require("./host-gate"), require("./host-transfer"), require("./host-context"), require("./host-check"), require("./host-ui"), require("./host-vs"), require("./host-safety")].forEach((m) => mixin(Host, m.Part));
 
 module.exports = { Host, PICKED_ID };

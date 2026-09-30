@@ -84,15 +84,22 @@ const RING_MAX = 300;
 const ring = [];
 function recentLog(n) { return ring.slice(-Math.max(1, Math.min(RING_MAX, n || RING_MAX))); }
 
+// Уровень журнала (moonCore.logLevel): "all" — всё; "errors" — только записи с ошибкой;
+// "off" — ничего. Последние строки в памяти (для отчёта Доктора) ведутся при любом уровне.
+const LEVELS = ["all", "errors", "off"];
+let level = "all";
+function setLogLevel(v) { level = LEVELS.indexOf(v) !== -1 ? v : "all"; return level; }
+
 /** log("текст") или log("где", ошибка). */
 function log(msg, err) {
     let line = "[" + stamp() + "] " + msg;
     if (err) line += ": " + (err && err.stack ? err.stack : String(err));
     const safe = redact(line);
-    channel().appendLine(safe);
     ring.push(safe);
     if (ring.length > RING_MAX) ring.splice(0, ring.length - RING_MAX);
-    if (logFile) {
+    const quiet = level === "off" || (level === "errors" && !err);
+    if (!quiet) channel().appendLine(safe);
+    if (logFile && !quiet) {
         pendingLines.push(new Date().toISOString().slice(0, 10) + " " + safe);
         if (pendingLines.length > 500) pendingLines.splice(0, pendingLines.length - 500);
         if (!flushTimer) { flushTimer = setTimeout(flushFile, 500); if (flushTimer.unref) flushTimer.unref(); }
@@ -104,4 +111,4 @@ function log(msg, err) {
 function showLog() { channel().show(true); }
 function disposeLog() { clearTimeout(flushTimer); flushFile(); if (_channel) { try { _channel.dispose(); } catch (e) {} _channel = null; } }
 
-module.exports = { log, showLog, disposeLog, redact, redactSecrets, recentLog, setLogFile, logFilePath, flushFile };
+module.exports = { setLogLevel, LEVELS, log, showLog, disposeLog, redact, redactSecrets, recentLog, setLogFile, logFilePath, flushFile };

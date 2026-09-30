@@ -190,6 +190,25 @@ function buildBlock(boot, runtime, opts) {
         WB_END + "\n";
 }
 
+/**
+ * Проверка оболочки перед записью: before — что лежит на диске, after — что собираемся записать.
+ * Внедрение меняет ровно две вещи — свой блок и CSP-мету. Если вне их изменилось что-то ещё,
+ * блоков стало два или блок оказался не в <head>, писать нельзя: VS Code может не открыться.
+ * Возвращает "" (всё в порядке) или причину.
+ */
+function shellProblem(before, after) {
+    const n = (s, mark) => String(s).split(mark).length - 1;
+    if (n(after, WB_START) !== 1 || n(after, WB_END) !== 1) return "в оболочке должен быть ровно один блок Moon Core";
+    const start = after.indexOf(WB_START), end = after.indexOf(WB_END), head = after.lastIndexOf("</head>");
+    if (start > end) return "метки блока Moon Core перепутаны";
+    if (head === -1 || end > head) return "блок Moon Core оказался вне <head>";
+    // Без блока и без CSP-меты оболочка должна остаться той же байт в байт.
+    const rest = (s) => String(s).replace(blockRe(), "").replace(CSP_RE, "");
+    if (rest(after) !== rest(before)) return "кроме блока Moon Core и CSP изменилось что-то ещё";
+    if (n(after, "<meta") !== n(before, "<meta")) return "изменилось число meta-тегов";
+    return "";
+}
+
 /** Вставить/обновить наш блок (идемпотентно). null — если в HTML нет </head>. */
 function applyBlock(html, block) {
     html = html.replace(blockRe(), "");
@@ -340,13 +359,19 @@ function foreignBlocks(html) {
 // пустые пары — блок с содержимым принадлежит живому загрузчику, его не трогаем.
 const LEGACY_EMPTY_RE = /[ \t]*<!-- !! VSCODE-CUSTOM-CSS-START !! -->\s*<!-- !! VSCODE-CUSTOM-CSS-END !! -->\n?/g;
 const LEGACY_SESSION_RE = /[ \t]*<!-- !! VSCODE-CUSTOM-CSS-SESSION-ID [^>]*!! -->\n?/g;
+// Ещё один след того же загрузчика: скрипт-значок (ведёрко в статусбаре) — он стоит вне меток и
+// остаётся после «Disable». Снимаем, только когда живого блока загрузчика в оболочке нет.
+const LEGACY_INDICATOR_RE = /[ \t]*<script>(?:(?!<\/script>)[\s\S]){0,4000}?__CUSTOM_CSS_JS_INDICATOR_CLS(?:(?!<\/script>)[\s\S]){0,4000}?<\/script>\r?\n?/;
+const legacyLive = (html) => html.replace(LEGACY_EMPTY_RE, "").indexOf("VSCODE-CUSTOM-CSS-START") !== -1;
 function hasLegacyLeftovers(html) {
+    html = String(html);
     LEGACY_EMPTY_RE.lastIndex = 0;
-    return LEGACY_EMPTY_RE.test(String(html));
+    return LEGACY_EMPTY_RE.test(html) || (LEGACY_INDICATOR_RE.test(html) && !legacyLive(html));
 }
 function stripLegacyLeftovers(html) {
     html = String(html);
     if (!hasLegacyLeftovers(html)) return html;
+    if (!legacyLive(html)) html = html.replace(LEGACY_INDICATOR_RE, "");
     html = html.replace(LEGACY_EMPTY_RE, "");
     // Комментарий сессии нужен только непустому блоку: если блока не осталось — убираем и его.
     if (html.indexOf("VSCODE-CUSTOM-CSS-START") === -1) html = html.replace(LEGACY_SESSION_RE, "");
@@ -355,7 +380,7 @@ function stripLegacyLeftovers(html) {
 
 module.exports = {
     WB_START, WB_END, TMP_EXT, BAK_EXT, escapeScript, safeJson, makeNonce, sha256, blockSha, findBlock, isInjected, blockInfo,
-    armCsp, buildBlock, applyBlock, stripBlock, writeWorkbenchAtomic, findWorkbenchIn, isRealWorkbench, isSessionsShell, unpatchFile,
+    armCsp, buildBlock, applyBlock, shellProblem, stripBlock, writeWorkbenchAtomic, findWorkbenchIn, isRealWorkbench, isSessionsShell, unpatchFile,
     MOD_FILE_PREFIX, moduleFileName, moduleFileContent, moduleFilesIn, removeModuleFiles, sriHash, foreignBlocks,
     BRIDGE_PORTS, CONNECT_ADD, TT_POLICY, addTrustedType, stripTrustedType, trustedTypesOf, moduleTrustedTypes, missingTrustedTypes,
     PRODUCT, productChecksum, checksumKey, setChecksumText, checksumMatches, productBackup, restoreChecksum,

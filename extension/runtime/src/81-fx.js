@@ -18,7 +18,34 @@
         var out = [];
         if (f.lineGlow) out.push(".monaco-editor .view-overlays .current-line { box-shadow: 0 0 " + (4 + k * 2) + "px " + Math.round(k / 2) + "px " + c + "55 !important; border-radius: 3px; }");
         if (f.cursorGlow) out.push(".monaco-editor .cursors-layer .cursor { box-shadow: 0 0 " + (3 + k) + "px " + Math.max(1, Math.round(k / 3)) + "px " + c + " !important; }");
-        return out.join("\n");
+        return out.concat(uiLookCss(f)).join("\n");
+    }
+    /**
+     * Вид интерфейса целиком: шрифт, скругление, плавные переходы, приглушение неактивных
+     * редакторов. Код редактора и терминал не задеваются: у них свой шрифт в style="".
+     */
+    var UI_FONT_RE = /^[\w\s,'".-]{1,120}$/;
+    function uiLookCss(f) {
+        var out = [], W = ".monaco-workbench ";
+        if (typeof f.uiFont === "string" && UI_FONT_RE.test(f.uiFont)) {
+            out.push(".monaco-workbench, " + W + ".quick-input-widget, .monaco-menu, .context-view, " + W + ".monaco-hover { font-family: " + f.uiFont + " !important; }");
+        }
+        var r = +f.roundedUi;
+        if (r >= 1 && r <= 12) {
+            out.push(W + ".monaco-button, " + W + ".monaco-inputbox, " + W + ".monaco-select-box, " + W + ".suggest-widget, " + W + ".monaco-hover, " +
+                W + ".quick-input-widget, .monaco-menu, " + W + ".notification-toast, " + W + ".find-widget, " + W + ".badge { border-radius: " + r + "px !important; }");
+            out.push(W + ".part.editor .tabs-container .tab { border-radius: " + r + "px " + r + "px 0 0 !important; }");
+            out.push(W + ".monaco-list-row { border-radius: " + Math.min(r, 6) + "px; }");
+        }
+        if (f.smoothUi) {
+            out.push("@media (prefers-reduced-motion: no-preference) { " + W + ".tab, " + W + ".action-label, " + W + ".monaco-button, " + W + ".statusbar-item, " +
+                W + ".activitybar .action-item, " + W + ".pane-header, " + W + ".monaco-inputbox { transition: background-color .16s ease, color .16s ease, border-color .16s ease, opacity .16s ease, box-shadow .16s ease; } }");
+        }
+        if (f.dimInactive) {
+            out.push(W + ".part.editor .editor-group-container:not(.active) .editor-container { opacity: .55; transition: opacity .18s ease; }");
+            out.push(W + ".part.editor .editor-group-container:not(.active):hover .editor-container { opacity: .9; }");
+        }
+        return out;
     }
     function cursorRect() {
         var c = null;

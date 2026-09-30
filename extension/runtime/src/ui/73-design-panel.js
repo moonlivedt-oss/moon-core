@@ -10,17 +10,20 @@
         var scroll = des.panel.scrollTop;
         des.panel.textContent = "";
         var head = h("div", "mc-h");
-        head.appendChild(h("div", "mc-title", des.entry && des.anchor === des.selEl ? des.entry.label : des.selEl ? labelFor(des.selEl) : "Конструктор"));
+        head.appendChild(h("div", "mc-title", des.multi > 1 ? "Выбрано элементов: " + des.multi : des.entry && des.anchor === des.selEl ? des.entry.label : des.selEl ? labelFor(des.selEl) : "Конструктор"));
         head.appendChild(xBtn(true, stopDesign, "Закрыть конструктор"));
-        head.title = "Перетащи, чтобы подвинуть панель";
+        head.title = "Перетащи, чтобы подвинуть панель; двойной клик — вернуть на место";
         makeDraggable(head);
         des.panel.appendChild(head);
         var n = changesCount();
         var tabs = h("div", "mc-tabs");
+        tabs.setAttribute("role", "tablist");
         [["map", "Карта"], ["el", "Элемент"], ["changes", "Правки" + (n ? " " + n : "")], ["profiles", "Профили"], ["more", "Ещё"]].forEach(function (t) {
             var b = h("button", "mc-tab" + (des.tab === t[0] ? " on" : ""), t[1]);
             b.type = "button";
-            b.addEventListener("click", function () { des.tab = t[0]; des.confirmClear = false; des.confirm = ""; renderPanel(true); });
+            b.setAttribute("role", "tab");
+            b.setAttribute("aria-selected", des.tab === t[0] ? "true" : "false");
+            b.addEventListener("click", function () { des.tab = t[0]; des.confirmClear = false; des.confirm = ""; rememberPanel({ tab: t[0] }); renderPanel(true); });
             tabs.appendChild(b);
         });
         des.panel.appendChild(tabs);
@@ -30,6 +33,7 @@
         else if (des.tab === "more") renderMore();
         else renderElement();
         des.panel.scrollTop = scroll;
+        updateHist();
     }
 
     function section(title, note) {
@@ -62,14 +66,14 @@
         var inp = h("input", "mc-sel"); inp.type = "text"; inp.spellcheck = false; inp.value = sel;
         var cnt = h("div", "mc-count");
         var upd = function () {
-            var k = count(inp.value.trim());
+            var k = count(stripState(inp.value.trim()));
             cnt.textContent = k === Infinity ? "селектор с ошибкой" : k === 0 ? "сейчас ничего не находит" : "совпадений: " + k + (k > 1 ? " — правка коснётся всех" : "");
             cnt.className = "mc-count" + (k === Infinity || k === 0 ? " bad" : "");
         };
         inp.addEventListener("input", upd);
         inp.addEventListener("change", function () {
             var v = inp.value.trim();
-            if (v && count(v) !== Infinity) { des.sel = v; renderPanel(true); }
+            if (v && count(stripState(v)) !== Infinity) { des.sel = v; renderPanel(true); }
         });
         upd();
         tgt.appendChild(inp); tgt.appendChild(cnt);
@@ -95,9 +99,13 @@
         } else if (des.entry && des.entry.many && des.selEl) {
             nav.appendChild(btn("Только этот", "", function () { des.sel = selectorFor(des.selEl); renderPanel(true); }));
         }
+        similarButton(nav);
         if (nav.childNodes.length) tgt.appendChild(nav);
+        if (des.selEl) tgt.appendChild(h("div", "mc-note", "Shift+клик по другому элементу — править несколько сразу."));
+        quickSection(sel, label);
         orderSection();
         condSection();
+        stateSection();
         colorSection(label);
         floatSection();
 
@@ -124,11 +132,10 @@
             if (risky.some(function (k) { return DS.rules[sel] && DS.rules[sel].props[k] !== undefined; })) det.open = true;
             sec2.appendChild(det);
         }
-        if (DS.rules[sel]) {
-            var foot = h("div", "mc-btns"); foot.style.margin = "10px 12px 0";
-            foot.appendChild(btn("Сбросить этот элемент", "danger", function () { resetRule(sel); renderPanel(true); }));
-            des.panel.appendChild(foot);
-        }
+        var foot = h("div", "mc-btns"); foot.style.margin = "10px 12px 0";
+        clipButtons(sel, label, foot);
+        if (DS.rules[sel]) foot.appendChild(btn("Сбросить этот элемент", "danger", function () { resetRule(sel); renderPanel(true); }));
+        if (foot.childNodes.length) des.panel.appendChild(foot);
     }
 
     function computed(prop) {
@@ -185,6 +192,7 @@
             col.addEventListener("input", function () { setProp(sel, prop, col.value, label); mark(); });
             ctl.appendChild(col);
             ctl.appendChild(h("span", "mc-note", isSet ? cur : "как в теме"));
+            colorExtras(col, ctl, row);
         } else if (p.type === "enum") {
             var s = h("select");
             var o0 = h("option", null, "как в теме"); o0.value = ""; s.appendChild(o0);
@@ -237,6 +245,15 @@
                 numb.value = v; range.value = v; setSetting(s.key, v, label);
             });
             ctl.appendChild(range); ctl.appendChild(numb);
+        } else if (s.type === "font") {
+            var ft = h("input"); ft.type = "text"; ft.spellcheck = false; ft.value = typeof cur === "string" ? cur : ""; ft.placeholder = "как в VS Code";
+            ft.addEventListener("change", function () {
+                var fv = ft.value.trim();
+                if (!fv) { if (DS.settings[s.key]) { undoSetting(s.key); flushOps(); renderPanel(true); } return; }
+                if (!/^[A-Za-z0-9 _,'".-]{1,160}$/.test(fv)) { toast("Шрифт: латинские имена через запятую, например: Fira Code, Consolas, monospace", "warn"); return; }
+                setSetting(s.key, fv, label); flushOps();
+            });
+            ctl.appendChild(ft);
         }
         row.appendChild(xBtn(!!rec, function () { undoSetting(s.key); flushOps(); renderPanel(true); }, rec ? "Вернуть: " + fmtVal(rec.hadPrev ? rec.prev : undefined) : ""));
         return row;

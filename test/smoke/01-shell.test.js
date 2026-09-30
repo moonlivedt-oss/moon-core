@@ -128,6 +128,16 @@ test("следы старого загрузчика: пустая пара Cust
     assert.strictEqual(W.stripLegacyLeftovers(empty), "a\nb");
     assert.ok(!W.hasLegacyLeftovers(BASE_HTML), "блок с содержимым — живой загрузчик");
     assert.strictEqual(W.stripLegacyLeftovers(BASE_HTML), BASE_HTML);
+    // Скрипт-значок выключенного загрузчика (ведёрко в статусбаре) — тоже след; у живого загрузчика не трогаем.
+    const ind = "\t<script>/* eslint-env browser */\r\n(function () {\r\n\te.className = \"statusbar-item right __CUSTOM_CSS_JS_INDICATOR_CLS\";\r\n})();\r\n</script>\n";
+    const tail = "<head></head>\n<body>\n" + ind + "</body>\n<script src=\"./workbench.js\" type=\"module\"></script>";
+    assert.ok(W.hasLegacyLeftovers(tail));
+    assert.strictEqual(W.stripLegacyLeftovers(tail), "<head></head>\n<body>\n</body>\n<script src=\"./workbench.js\" type=\"module\"></script>");
+    const live = BASE_HTML.replace("<body></body>", "<body>" + ind + "</body>");
+    assert.ok(!W.hasLegacyLeftovers(live));
+    assert.strictEqual(W.stripLegacyLeftovers(live), live, "рядом живой блок загрузчика — значок его");
+    const two = "<script>keep()</script>\n" + ind + "<script>keep2()</script>";
+    assert.strictEqual(W.stripLegacyLeftovers(two), "<script>keep()</script>\n<script>keep2()</script>", "соседние скрипты целы");
 });
 
 test("окно сессий: находится только по флагу", () => {

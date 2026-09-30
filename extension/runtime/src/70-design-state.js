@@ -16,6 +16,8 @@
         try { applyFx(); } catch (e) { report("эффекты", e); }
     }
     var CATALOG = [], ZONES = [], PROPS = {}, SETNOW = {}, PROFILES = null;
+    // Сколько шагов можно отменить и вернуть — со слов хоста, который выполнил последнюю правку.
+    var HIST = { undo: 0, redo: 0 };
     var localEditAt = 0, opQueue = [], opKeys = {}, opTimer = null, flushSeq = 0;
     var designStyle = null;
     var des = null;   // {host, hoverEl, selEl, sel, entry, stack, tab, confirmClear, ...}
@@ -42,17 +44,20 @@
         var p = PROPS[prop];
         if (!p) return "";
         if (p.type === "flag") return p.value;
-        if (p.type === "number") return v + (p.unit || "");
+        if (p.type === "number") return p.tpl ? p.tpl.replace("%", String(v)) : v + (p.unit || "");
         return String(v);
     }
     function designCss() {
         var sels = Object.keys(DS.rules).sort(function (a, b) { return ((DS.rules[a].ts || 0) - (DS.rules[b].ts || 0)) || (a < b ? -1 : 1); });
         // peek — правило, скрытое на время подсветки (наведение на правку во вкладке «Правки»).
         if (des && des.peek) sels = sels.filter(function (s) { return s !== des.peek; });
+        sels = sels.filter(function (s) { return !DS.rules[s].off; });      // выключенные правила не применяются
         return sels.map(function (sel) {
             var r = DS.rules[sel];
             var decl = Object.keys(r.props || {}).filter(function (k) { return PROPS[k]; }).map(function (k) {
-                return "  " + PROPS[k].css + ": " + cssVal(k, r.props[k]) + " !important;";
+                // «Показать скрытое» в конструкторе: скрытый элемент виден бледным и в рамке — его можно выбрать.
+                if (k === "hide" && des && des.showHidden) return "  outline: 1px dashed var(--vscode-focusBorder, #89b4fa) !important;\n  opacity: .55 !important;";
+                return "  " + PROPS[k].css + ": " + cssVal(k, r.props[k]) + " !important;" + (PROPS[k].extra ? "\n  " + PROPS[k].extra + ";" : "");
             });
             return sel + " {\n" + decl.join("\n") + "\n}";
         }).join("\n");
@@ -82,11 +87,12 @@
         var ops = opQueue; opQueue = []; opKeys = {};
         var seq = ++flushSeq;
         rpcFirst("design", { ops: ops }, des && des.host).then(function (r) {
-            if (!r || r.ok === false) toast("Moon Core: " + ((r && r.error) || "расширение не ответило — правка видна, но не сохранена"));
+            if (!r || r.ok === false) toast("Moon Core: " + ((r && r.error) || "расширение не ответило — правка видна, но не сохранена"), "error");
             if (r && r.design && seq === flushSeq && !opQueue.length) {
                 DS = toDS(r.design);
                 if (r.settingsNow) SETNOW = r.settingsNow;
                 if (r.profiles) PROFILES = r.profiles;
+                if (r.history) HIST = r.history;
                 localEditAt = 0;
                 setTimeout(clearColorPreview, 400);
                 afterDS();
@@ -118,7 +124,9 @@
     function fpFor(sel, el, entry) {
         try {
             var e = el || (des && des.selEl);
-            if (e && e.isConnected && hits(sel, e)) return fingerprint(e, sel);
+            // Правило «по состоянию» (:hover) сейчас никого не находит — отпечаток снимаем по основе.
+            var plain = sel.replace(/:(hover|focus-within|active)$/, "");
+            if (e && e.isConnected && hits(plain, e)) return fingerprint(e, plain);
             var en = entry || (des && des.entry);
             if (en && sel === en.selector) return fingerprintEntry(en);
         } catch (err) {}

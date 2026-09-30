@@ -32,7 +32,7 @@ const settings = {};                                   // «settings.json» ст
 // Контекст «окна» стенда; поменять: /test/ctx?lang=markdown
 const CTX = { lang: "javascript", branch: "main", folder: "moon-core", theme: "dark" };
 const DEFAULTS = {};
-C.CATALOG.forEach((e) => e.settings.forEach((s) => { DEFAULTS[s.key] = s.type === "bool" ? true : s.type === "enum" ? s.options[0] : Math.max(s.min, Math.min(s.max, 12)); }));
+C.CATALOG.forEach((e) => e.settings.forEach((s) => { DEFAULTS[s.key] = s.type === "bool" ? true : s.type === "enum" ? s.options[0] : s.type === "font" ? "Consolas, monospace" : Math.max(s.min, Math.min(s.max, 12)); }));
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "mooncore-fixture-"));
 const engine = new DesignEngine({
     designFile: path.join(TMP, "design.json"),

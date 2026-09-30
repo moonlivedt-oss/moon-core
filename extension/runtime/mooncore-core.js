@@ -55,6 +55,15 @@
     var NONCE = (document.currentScript && document.currentScript.nonce) || "";
     var ID_RE = /^[A-Za-z0-9][\w.-]{0,63}\.(css|js)$/;
     var Z = 2147483000;
+    // Безопасный режим (флаг из состояния): сниппеты, правки и модули не работают.
+    var SAFE = false;
+    // Случайный id этого окна: по нему хост отличает окна в пульсе (метод моста "hello").
+    var WIN_ID = (function () {
+        var s = "";
+        try { var a = new Uint8Array(8); window.crypto.getRandomValues(a); for (var i = 0; i < a.length; i++) s += ("0" + a[i].toString(16)).slice(-2); } catch (e) { s = ""; }
+        while (s.length < 16) s += Math.floor(Math.random() * 16).toString(16);
+        return s;
+    })();
 
     // ---------------------------------------------------------------------------
     //  Файлы хранилища (только чтение) — через vscode-file://vscode-app/<путь>.
@@ -94,10 +103,25 @@
     //  Журнал: ошибки уходят в Output «Moon Core» (через мост), плюс консоль DevTools.
     // ---------------------------------------------------------------------------
     var _logCount = 0, _logWindow = 0;
+    // JS-сниппет, который падает без остановки (таймер, наблюдатель за DOM), тормозит окно и
+    // заваливает журнал. Больше CRASH_MAX ошибок за минуту — сниппет останавливается в этом
+    // окне до правки его кода (или перезагрузки окна).
+    var CRASH_MAX = 8, crashes = {}, crashed = {};
+    function crashGuard(id) {
+        var t = Date.now(), c = crashes[id];
+        if (!c || t - c.start > 60000) c = crashes[id] = { start: t, n: 0 };
+        if (++c.n <= CRASH_MAX || !running[id] || crashed[id] != null) return;
+        crashed[id] = running[id].code;
+        setTimeout(function () {
+            try { stopJs(id); } catch (e) {}
+            try { toast("Moon Core: сниппет " + id + " остановлен — он падает без остановки. Поправь код, он запустится снова.", "error"); } catch (e) {}
+        }, 0);
+    }
     function report(where, err, snippet) {
         try { console.error("[moon-core] " + where + ":", err); } catch (e) {}
         var now = Date.now();
         if (now - _logWindow > 60000) { _logWindow = now; _logCount = 0; }
+        if (snippet) crashGuard(snippet);
         if (++_logCount > 30) return;                         // цикл ошибок не завалит журнал
         rpcAny("log", {
             where: String(where).slice(0, 80),
@@ -193,6 +217,7 @@
         rec.es.onopen = function () {
             stage("bridge"); rec.errors = 0; rec.open = true;
             if (hasFocus() && !ownToken) probeOwnHost();
+            sendHello(rec);
             // Новый (или вернувшийся) хост не знает подписок модулей на события VS Code и их команд.
             setTimeout(function () { try { vsResubscribe(null); } catch (e) {} }, 0);
         };
@@ -219,6 +244,10 @@
         on(rec, "ctx", function (d) { onCtx(rec, d); });
         on(rec, "vs", function (d) { deliverVs(rec, d); });
         on(rec, "moduleSet", function (d) { applyModuleSet(rec, d); });
+    }
+    /** Пульс: хост узнаёт, что окно живо и какой в нём рантайм (Доктор покажет окна со старым). */
+    function sendHello(rec) {
+        try { rpc(rec, "hello", { win: WIN_ID, version: BOOT.version || "", rev: rev, safe: SAFE }); } catch (e) {}
     }
     function on(rec, ev, fn) {
         rec.es.addEventListener(ev, function (e) {
@@ -844,21 +873,26 @@
     var styles = {};         // id -> <style>
     var running = {};        // id -> {code, disposers}
     var rev = "";
+    // Предпросмотр стиля, которого ещё нет среди сниппетов (галерея: стиль виден по наведению в
+    // списке, до включения). Такой предпросмотр живёт, пока хост его не снимет.
+    var PREVIEW_ONLY = "gallery-preview.css";
     var domReady = false;
 
     function applyState(st) {
         if (!st || !Array.isArray(st.snippets)) return;
+        SAFE = st.safe === true;
         var next = {};
         st.snippets.slice(0, PROTO.MAX_SNIPPETS).forEach(function (s) {
             if (!s || !ID_RE.test(String(s.id)) || typeof s.code !== "string" || s.code.length > PROTO.MAX_SNIPPET) return;
             next[s.id] = { kind: /\.js$/.test(s.id) ? "js" : "css", code: s.code };
         });
         // Сохранили ровно то, что было в превью, — превью больше не нужно.
-        Object.keys(previews).forEach(function (id) { if (!next[id] || next[id].code === previews[id]) delete previews[id]; });
+        Object.keys(previews).forEach(function (id) { if (id !== PREVIEW_ONLY && (!next[id] || next[id].code === previews[id])) delete previews[id]; });
         saved = next;
         rev = String(st.rev || "");
         adoptDesign(st);
         render(false);
+        try { safeBadge(); } catch (e) {}
     }
 
     function applyPreview(d) {
@@ -871,13 +905,16 @@
     function headEl() { return document.head || document.documentElement; }
 
     function renderCss() {
-        var ids = Object.keys(saved).filter(function (id) { return saved[id].kind === "css"; }).sort();
+        var ids = Object.keys(saved).filter(function (id) { return saved[id].kind === "css"; });
+        if (previews[PREVIEW_ONLY] != null && !saved[PREVIEW_ONLY] && !SAFE) ids.push(PREVIEW_ONLY);
+        ids.sort();
         Object.keys(styles).forEach(function (id) {
             if (ids.indexOf(id) === -1) { try { styles[id].remove(); } catch (e) {} delete styles[id]; }
         });
         var reorder = false;
         ids.forEach(function (id) {
             var code = previews[id] != null ? previews[id] : saved[id].code;
+            if (typeof code !== "string") return;
             var el = styles[id];
             if (!el) {
                 el = document.createElement("style");
@@ -893,6 +930,7 @@
         if (reorder) ids.forEach(function (id) { headEl().appendChild(styles[id]); });
         if (reorder && designStyle) headEl().appendChild(designStyle);
         renderDesignCss();
+        if (panicOn) applyPanic();                 // «стоп-кран» держит выключенными и новые стили
     }
 
     function renderJs(force) {
@@ -902,7 +940,9 @@
         });
         if (!domReady) return;
         Object.keys(saved).sort().forEach(function (id) {
-            if (saved[id].kind === "js" && !running[id]) runJs(id, saved[id].code);
+            // Остановленный за поток ошибок сниппет ждёт нового кода.
+            if (crashed[id] != null && crashed[id] !== saved[id].code) delete crashed[id];
+            if (saved[id].kind === "js" && !running[id] && crashed[id] == null) runJs(id, saved[id].code);
         });
     }
 
@@ -1038,24 +1078,49 @@
     // ---------------------------------------------------------------------------
     //  Тост.
     // ---------------------------------------------------------------------------
-    var toastEl = null, toastTimer = null;
-    function toast(text) {
+    //  Сообщения складываются стопкой (до TOAST_MAX), каждое гаснет само; повтор того же текста
+    //  не плодит строки, а продлевает уже показанную. kind: "" | "warn" | "error" — цвет рамки
+    //  и время показа.
+    var toastEl = null, toastItems = [], TOAST_MAX = 4;
+    var TOAST_KIND = { warn: ["var(--vscode-editorWarning-foreground, #f9e2af)", 4200], error: ["var(--vscode-errorForeground, #f38ba8)", 6000] };
+    function toastDrop(it) {
+        clearTimeout(it.timer);
+        try { it.el.remove(); } catch (e) {}
+        var i = toastItems.indexOf(it);
+        if (i !== -1) toastItems.splice(i, 1);
+        if (!toastItems.length && toastEl) { try { toastEl.remove(); } catch (e) {} }
+    }
+    function toast(text, kind) {
         if (!document.body) return;
+        text = String(text);
+        var k = TOAST_KIND[kind] || ["var(--vscode-focusBorder, #89b4fa)", 2600];
         if (!toastEl) {
             toastEl = document.createElement("div");
             toastEl.setAttribute("data-mooncore-ui", "toast");
+            toastEl.setAttribute("role", "status");
+            toastEl.setAttribute("aria-live", "polite");
             Object.assign(toastEl.style, {
                 position: "fixed", left: "50%", bottom: "48px", transform: "translateX(-50%)", zIndex: String(Z + 5),
-                padding: "8px 14px", borderRadius: "8px", font: "12px/1.4 var(--vscode-font-family, sans-serif)",
-                background: "var(--vscode-editorWidget-background, #1e1e2e)", color: "var(--vscode-editorWidget-foreground, #cdd6f4)",
-                border: "1px solid var(--vscode-focusBorder, #89b4fa)", boxShadow: "0 6px 24px rgba(0,0,0,.35)", pointerEvents: "none",
-                maxWidth: "70vw", whiteSpace: "pre-wrap",
+                display: "flex", flexDirection: "column", alignItems: "center", gap: "6px", pointerEvents: "none", maxWidth: "70vw",
             });
         }
-        toastEl.textContent = String(text);
-        document.body.appendChild(toastEl);
-        clearTimeout(toastTimer);
-        toastTimer = setTimeout(function () { if (toastEl) toastEl.remove(); }, 2600);
+        var same = null;
+        for (var i = 0; i < toastItems.length; i++) if (toastItems[i].text === text) same = toastItems[i];
+        if (same) { clearTimeout(same.timer); same.timer = setTimeout(function () { toastDrop(same); }, k[1]); return; }
+        var el = document.createElement("div");
+        Object.assign(el.style, {
+            padding: "8px 14px", borderRadius: "8px", font: "12px/1.4 var(--vscode-font-family, sans-serif)",
+            background: "var(--vscode-editorWidget-background, #1e1e2e)", color: "var(--vscode-editorWidget-foreground, #cdd6f4)",
+            border: "1px solid " + k[0], boxShadow: "0 6px 24px rgba(0,0,0,.35)", whiteSpace: "pre-wrap",
+        });
+        el.textContent = text;
+        var it = { el: el, text: text, timer: null };
+        it.timer = setTimeout(function () { toastDrop(it); }, k[1]);
+        toastItems.push(it);
+        while (toastItems.length > TOAST_MAX) toastDrop(toastItems[0]);
+        toastEl.appendChild(el);
+        toastEl.style.bottom = des ? "84px" : "48px";          // над полосой конструктора, а не поверх неё
+        if (!toastEl.isConnected) document.body.appendChild(toastEl);
     }
 
     // ---------------------------------------------------------------------------
@@ -1429,6 +1494,8 @@
         try { applyFx(); } catch (e) { report("эффекты", e); }
     }
     var CATALOG = [], ZONES = [], PROPS = {}, SETNOW = {}, PROFILES = null;
+    // Сколько шагов можно отменить и вернуть — со слов хоста, который выполнил последнюю правку.
+    var HIST = { undo: 0, redo: 0 };
     var localEditAt = 0, opQueue = [], opKeys = {}, opTimer = null, flushSeq = 0;
     var designStyle = null;
     var des = null;   // {host, hoverEl, selEl, sel, entry, stack, tab, confirmClear, ...}
@@ -1455,17 +1522,20 @@
         var p = PROPS[prop];
         if (!p) return "";
         if (p.type === "flag") return p.value;
-        if (p.type === "number") return v + (p.unit || "");
+        if (p.type === "number") return p.tpl ? p.tpl.replace("%", String(v)) : v + (p.unit || "");
         return String(v);
     }
     function designCss() {
         var sels = Object.keys(DS.rules).sort(function (a, b) { return ((DS.rules[a].ts || 0) - (DS.rules[b].ts || 0)) || (a < b ? -1 : 1); });
         // peek — правило, скрытое на время подсветки (наведение на правку во вкладке «Правки»).
         if (des && des.peek) sels = sels.filter(function (s) { return s !== des.peek; });
+        sels = sels.filter(function (s) { return !DS.rules[s].off; });      // выключенные правила не применяются
         return sels.map(function (sel) {
             var r = DS.rules[sel];
             var decl = Object.keys(r.props || {}).filter(function (k) { return PROPS[k]; }).map(function (k) {
-                return "  " + PROPS[k].css + ": " + cssVal(k, r.props[k]) + " !important;";
+                // «Показать скрытое» в конструкторе: скрытый элемент виден бледным и в рамке — его можно выбрать.
+                if (k === "hide" && des && des.showHidden) return "  outline: 1px dashed var(--vscode-focusBorder, #89b4fa) !important;\n  opacity: .55 !important;";
+                return "  " + PROPS[k].css + ": " + cssVal(k, r.props[k]) + " !important;" + (PROPS[k].extra ? "\n  " + PROPS[k].extra + ";" : "");
             });
             return sel + " {\n" + decl.join("\n") + "\n}";
         }).join("\n");
@@ -1495,11 +1565,12 @@
         var ops = opQueue; opQueue = []; opKeys = {};
         var seq = ++flushSeq;
         rpcFirst("design", { ops: ops }, des && des.host).then(function (r) {
-            if (!r || r.ok === false) toast("Moon Core: " + ((r && r.error) || "расширение не ответило — правка видна, но не сохранена"));
+            if (!r || r.ok === false) toast("Moon Core: " + ((r && r.error) || "расширение не ответило — правка видна, но не сохранена"), "error");
             if (r && r.design && seq === flushSeq && !opQueue.length) {
                 DS = toDS(r.design);
                 if (r.settingsNow) SETNOW = r.settingsNow;
                 if (r.profiles) PROFILES = r.profiles;
+                if (r.history) HIST = r.history;
                 localEditAt = 0;
                 setTimeout(clearColorPreview, 400);
                 afterDS();
@@ -1531,7 +1602,9 @@
     function fpFor(sel, el, entry) {
         try {
             var e = el || (des && des.selEl);
-            if (e && e.isConnected && hits(sel, e)) return fingerprint(e, sel);
+            // Правило «по состоянию» (:hover) сейчас никого не находит — отпечаток снимаем по основе.
+            var plain = sel.replace(/:(hover|focus-within|active)$/, "");
+            if (e && e.isConnected && hits(plain, e)) return fingerprint(e, plain);
             var en = entry || (des && des.entry);
             if (en && sel === en.selector) return fingerprintEntry(en);
         } catch (err) {}
@@ -1790,7 +1863,34 @@
         var out = [];
         if (f.lineGlow) out.push(".monaco-editor .view-overlays .current-line { box-shadow: 0 0 " + (4 + k * 2) + "px " + Math.round(k / 2) + "px " + c + "55 !important; border-radius: 3px; }");
         if (f.cursorGlow) out.push(".monaco-editor .cursors-layer .cursor { box-shadow: 0 0 " + (3 + k) + "px " + Math.max(1, Math.round(k / 3)) + "px " + c + " !important; }");
-        return out.join("\n");
+        return out.concat(uiLookCss(f)).join("\n");
+    }
+    /**
+     * Вид интерфейса целиком: шрифт, скругление, плавные переходы, приглушение неактивных
+     * редакторов. Код редактора и терминал не задеваются: у них свой шрифт в style="".
+     */
+    var UI_FONT_RE = /^[\w\s,'".-]{1,120}$/;
+    function uiLookCss(f) {
+        var out = [], W = ".monaco-workbench ";
+        if (typeof f.uiFont === "string" && UI_FONT_RE.test(f.uiFont)) {
+            out.push(".monaco-workbench, " + W + ".quick-input-widget, .monaco-menu, .context-view, " + W + ".monaco-hover { font-family: " + f.uiFont + " !important; }");
+        }
+        var r = +f.roundedUi;
+        if (r >= 1 && r <= 12) {
+            out.push(W + ".monaco-button, " + W + ".monaco-inputbox, " + W + ".monaco-select-box, " + W + ".suggest-widget, " + W + ".monaco-hover, " +
+                W + ".quick-input-widget, .monaco-menu, " + W + ".notification-toast, " + W + ".find-widget, " + W + ".badge { border-radius: " + r + "px !important; }");
+            out.push(W + ".part.editor .tabs-container .tab { border-radius: " + r + "px " + r + "px 0 0 !important; }");
+            out.push(W + ".monaco-list-row { border-radius: " + Math.min(r, 6) + "px; }");
+        }
+        if (f.smoothUi) {
+            out.push("@media (prefers-reduced-motion: no-preference) { " + W + ".tab, " + W + ".action-label, " + W + ".monaco-button, " + W + ".statusbar-item, " +
+                W + ".activitybar .action-item, " + W + ".pane-header, " + W + ".monaco-inputbox { transition: background-color .16s ease, color .16s ease, border-color .16s ease, opacity .16s ease, box-shadow .16s ease; } }");
+        }
+        if (f.dimInactive) {
+            out.push(W + ".part.editor .editor-group-container:not(.active) .editor-container { opacity: .55; transition: opacity .18s ease; }");
+            out.push(W + ".part.editor .editor-group-container:not(.active):hover .editor-container { opacity: .9; }");
+        }
+        return out;
     }
     function cursorRect() {
         var c = null;
@@ -2124,6 +2224,61 @@
     }
 
     // ---------------------------------------------------------------------------
+    //  Страховки окна.
+    //
+    //  «Стоп-кран»: Ctrl+Alt+Shift+Backspace выключает в этом окне все стили Moon Core
+    //  (сниппеты, правки конструктора, эффекты) — и включает обратно. Работает без расширения и
+    //  без моста: если правка спрятала что-то нужное, до конструктора можно добраться. Ничего не
+    //  удаляется и не сохраняется: после перезагрузки окна стили снова на месте.
+    //
+    //  Безопасный режим (его включает расширение, флаг приходит в состоянии): сниппеты, правки
+    //  и модули не работают во всех окнах; в углу окна — напоминание.
+    // ---------------------------------------------------------------------------
+    var panicOn = false, safeEl = null;
+
+    function ourStyleNodes() {
+        var list = Object.keys(styles).map(function (id) { return styles[id]; });
+        if (designStyle) list.push(designStyle);
+        if (fx.style) list.push(fx.style);
+        try { Array.prototype.forEach.call(document.querySelectorAll("style[data-mooncore-js]"), function (s) { list.push(s); }); } catch (e) {}
+        return list;
+    }
+    function applyPanic() {
+        var media = panicOn ? "not all" : "";
+        ourStyleNodes().forEach(function (s) { try { s.media = media; } catch (e) {} });
+        if (fx.canvas) fx.canvas.style.display = panicOn ? "none" : "";
+    }
+    function setPanic(on) {
+        panicOn = !!on;
+        applyPanic();
+        toast(panicOn ? "Moon Core: стили отключены в этом окне. Ctrl+Alt+Shift+Backspace — включить обратно." : "Moon Core: стили снова включены.", panicOn ? "warn" : "");
+        return panicOn;
+    }
+    function onPanicKey(e) {
+        if (!e || e.key !== "Backspace" || !e.ctrlKey || !e.altKey || !e.shiftKey) return;
+        try { e.preventDefault(); e.stopPropagation(); } catch (err) {}
+        setPanic(!panicOn);
+    }
+    try { window.addEventListener("keydown", onPanicKey, true); } catch (e) {}
+
+    /** Напоминание о безопасном режиме в углу окна (и его снятие, когда режим выключили). */
+    function safeBadge() {
+        if (!SAFE) { if (safeEl) { try { safeEl.remove(); } catch (e) {} safeEl = null; } return; }
+        if (safeEl || !document.body) return;
+        safeEl = document.createElement("div");
+        safeEl.setAttribute("data-mooncore-ui", "safe");
+        safeEl.textContent = "Moon Core: безопасный режим";
+        safeEl.title = "Сниппеты, правки конструктора и модули отключены. Выйти: значок Moon в статусбаре — «Безопасный режим».";
+        Object.assign(safeEl.style, {
+            position: "fixed", left: "10px", bottom: "30px", zIndex: String(Z + 4), padding: "3px 10px", borderRadius: "10px",
+            font: "11px/1.5 var(--vscode-font-family, sans-serif)", pointerEvents: "auto", cursor: "default",
+            background: "var(--vscode-statusBarItem-warningBackground, #d29922)", color: "var(--vscode-statusBarItem-warningForeground, #11111b)",
+            boxShadow: "0 4px 14px rgba(0,0,0,.35)",
+        });
+        document.body.appendChild(safeEl);
+    }
+
+    // ---------------------------------------------------------------------------
     //  Старт и самолечение.
     // ---------------------------------------------------------------------------
     function whenWorkbench(cb) {
@@ -2145,12 +2300,14 @@
         afterDS();
         // VS Code перерисовывает статусбар и титлбар — свои кнопки возвращаем на место.
         setInterval(function () { try { ensureButtons(); } catch (e) {} }, 1500);
+        try { safeBadge(); } catch (e) {}
         // Контекст окна (язык, ветка...) — спросить свой хост сразу, не дожидаясь событий.
         setTimeout(function () { rpcFirst("context", {}, ownToken && hosts[ownToken] ? hosts[ownToken] : null).then(function (r) { if (r && r.ok) applyCtx(r); }); }, 1500);
     });
 
     refreshHosts();
     setInterval(refreshHosts, 5000);
+    setInterval(function () { Object.keys(hosts).forEach(function (t) { if (hosts[t].open) sendHello(hosts[t]); }); }, 60000);
     // VS Code перестраивает DOM — наши <style> могли выпасть из <head>. Наблюдатель за <head>
     // возвращает их сразу и без опроса; редкий таймер — страховка (и путь без MutationObserver).
     var cssHealT = null;
@@ -2198,6 +2355,7 @@
         /** Защита запуска (зовёт первая строка файла модуля): пропустить ли модуль id. */
         _skip: function (id) {
             modRan[id] = true;
+            if (SAFE) return true;                       // безопасный режим: модули не запускаются
             var s = skipAll || (skipOne && skipOne === id);
             if (s && skipped.indexOf(id) === -1) skipped.push(id);
             return !!s;
@@ -2228,6 +2386,8 @@
         applyPreview: applyPreview,
         checkAll: checkAll,
         fail: function (id, e) { report("выполнение", e, id); },
+        /** «Стоп-кран»: выключить (true) или включить (false) все стили Moon Core в этом окне. Без аргумента — переключить. */
+        panic: function (on) { return setPanic(on === undefined ? !panicOn : on); },
         /** Помощник модуля (null — модуль не впечатан). */
         module: moduleApi,
         /** Загрузить ленивый (или снова включить выключенный) модуль: Promise<boolean>. */
@@ -2238,7 +2398,8 @@
         shared: { get: function (k) { return sharedGet(k); }, on: function (k, fn) { return sharedOn(k, fn); } },
         info: function () {
             return {
-                rev: rev, domReady: domReady,
+                rev: rev, domReady: domReady, safe: SAFE, panic: panicOn, win: WIN_ID,
+                stopped: Object.keys(crashed),
                 css: Object.keys(styles), js: Object.keys(running), previews: Object.keys(previews),
                 design: { rules: Object.keys(DS.rules).length, settings: Object.keys(DS.settings).length, on: !!des, queued: opQueue.length },
                 hosts: Object.keys(hosts).map(function (t) { return { port: hosts[t].port, open: hosts[t].open, own: isOwnHost(t) }; }),

@@ -14,6 +14,7 @@ const fs = require("fs");
 const path = require("path");
 const { findWorkbenchIn, unpatchFile, TMP_EXT, restoreChecksum, checksumKey } = require("./lib/wb-patch");
 const DP = require("./lib/deep");
+const WV = require("./lib/webview-patch");
 
 /** Снять глубокие патчи: крючок сервисов окна в бандле (и его хэш), импорт в main.js, скрипт главного процесса. */
 function unpatchDeep(dir) {
@@ -25,6 +26,9 @@ function unpatchDeep(dir) {
     const main = path.join(dir, "main.js");
     try { const t = fs.readFileSync(main, "utf8"); if (DP.hasMain(t)) fs.writeFileSync(main, DP.stripMain(t), "utf8"); } catch (e) {}
     try { fs.unlinkSync(path.join(dir, DP.MAIN_FILE)); } catch (e) {}
+    // Стили webview: наша вставка в основе webview — прочь, хэш скрипта возвращается.
+    const wv = WV.fileIn(dir);
+    try { const t = fs.readFileSync(wv, "utf8"); if (WV.hasPatch(t)) fs.writeFileSync(wv, WV.strip(t), "utf8"); } catch (e) {}
 }
 
 function outDirs() {

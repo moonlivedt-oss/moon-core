@@ -223,7 +223,7 @@ function status(context) {
     try { const mods = moduleSet(context); sha = W.blockSha(UF.runtimeFor(context).code, mods.scripts); tt = moduleTrustedTypeNames(mods); } catch (e) {}
     // Глубокие патчи (сервисы окна, главный процесс) — часть «актуальности»: включил или
     // выключил их в настройках, или VS Code обновился и стёр их — блок устарел.
-    const d = deepState();
+    const d = deepState(context);
     return workbenchFiles().map((f) => {
         const s = shellStatus(context, f, sha, tt);
         if (!d || !W.isRealWorkbench(s.file)) return s;

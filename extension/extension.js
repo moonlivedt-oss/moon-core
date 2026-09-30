@@ -18,13 +18,17 @@ const inject = require("./lib/inject");
 const MH = require("./lib/module-host");
 const path = require("path");
 const { openDoctor, exportDiagnostics } = require("./lib/doctor");
-const { log, showLog, disposeLog, setLogFile } = require("./lib/log");
+const { log, showLog, disposeLog, setLogFile, setLogLevel } = require("./lib/log");
 const { storageDir } = require("./lib/storage");
 const { showPermissions, revokeAll } = require("./lib/ext/permissions");
 const { createStatus, menu, diagnostics } = require("./lib/ext/status");
 const { createSnippetView } = require("./lib/ext/snippet-tree");
 const { writeMainConf, mainStatus, deepCommand, windowLookCommand } = require("./lib/ext/window-look");
 const { watchModules } = require("./lib/ext/module-watch");
+const { createLookView } = require("./lib/ext/look-tree");
+const X = require("./lib/ext/extras");
+const VU = require("./lib/ext/vs-files-ui");
+const { createSnippetCompletion } = require("./lib/ext/snippet-complete");
 
 let host = null;
 
@@ -32,7 +36,7 @@ let host = null;
 function idOf(arg) { return host.snippetId(arg && typeof arg === "object" ? arg.id : arg); }
 
 // Настройки, меняющие то, КАК записана оболочка: после их смены блок переписывается сразу.
-const REWRITE_KEYS = ["moonCore.moduleFiles", "moonCore.injectSessions", "moonCore.fixChecksum", "moonCore.moduleIntegrity", "moonCore.deepHooks", "moonCore.mainProcess", "moonCore.lazyUi"];
+const REWRITE_KEYS = ["moonCore.moduleFiles", "moonCore.injectSessions", "moonCore.fixChecksum", "moonCore.moduleIntegrity", "moonCore.deepHooks", "moonCore.mainProcess", "moonCore.lazyUi", "moonCore.webviewStyles"];
 
 /** API для других расширений: vscode.extensions.getExtension("moonlivedt.moon-core").activate(). Типы — types/mooncore.d.ts. */
 function makeApi(context) {
@@ -93,6 +97,18 @@ function registerCommands(context, refreshModules) {
     reg("moonCore.openSnippet", (s) => { const id = idOf(s); if (id) return host.open(id); return undefined; });
     reg("moonCore.deleteSnippet", (s) => { const id = idOf(s); if (id) return host.remove(id); return undefined; });
     reg("moonCore.toggleSnippet", (s) => { const id = idOf(s); if (id) host.setEnabled(id, !host.isEnabled(id)); });
+    reg("moonCore.safeMode", () => host.safeModeCommand());
+    reg("moonCore.restoreBackup", () => host.restoreBackupCommand());
+    reg("moonCore.undo", () => host.historyCommand("undo"));
+    reg("moonCore.redo", () => host.historyCommand("redo"));
+    reg("moonCore.gallery", () => X.galleryCommand(host));
+    reg("moonCore.applyProfile", (name) => X.applyProfileCommand(host, typeof name === "string" ? name : ""));
+    reg("moonCore.profileNext", () => X.profileNextCommand(host, 1));
+    reg("moonCore.copyLook", () => X.copyLookCommand(host));
+    reg("moonCore.pasteLook", () => X.pasteLookCommand(host));
+    reg("moonCore.importCustomCss", () => X.importCustomCssCommand(host));
+    reg("moonCore.webviewStyles", () => VU.webviewStylesCommand(context, host));
+    reg("moonCore.restoreSnippets", () => host.restoreSnippetsCommand());
     reg("moonCore.openFolder", () => vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(host.dir)));
 }
 
@@ -100,8 +116,13 @@ function activate(context) {
     try {
         // Журнал и в файл: Output пропадает с окном, а файл нужен, когда VS Code не открылся.
         setLogFile(path.join(storageDir(context), "mooncore.log"));
+        setLogLevel(vscode.workspace.getConfiguration("moonCore").get("logLevel", "all"));
         host = new Host(context);
         createSnippetView(context, host);
+        createLookView(context, host);
+        X.createSnippetDiagnostics(context, host);
+        VU.watchWebviewCss(context, host);
+        createSnippetCompletion(context, host);
         const refreshModules = watchModules(context, host);
         registerCommands(context, refreshModules);
 
@@ -123,6 +144,7 @@ function activate(context) {
         host.autoCheckAfterUpdate().catch((e) => log("проверка после обновления VS Code", e));
         context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
             if (e.affectsConfiguration("moonCore.window")) writeMainConf(context);
+            if (e.affectsConfiguration("moonCore.logLevel")) setLogLevel(vscode.workspace.getConfiguration("moonCore").get("logLevel", "all"));
             if (!REWRITE_KEYS.some((k) => e.affectsConfiguration(k))) return;
             if (!inject.status(context).some((s) => s.injected) && !e.affectsConfiguration("moonCore.injectSessions")) return;
             inject.injectCommand(context).catch((er) => log("перевнедрение после смены настройки", er));
@@ -130,7 +152,8 @@ function activate(context) {
         if (host.syncEnabled()) host.syncIn(true).catch((e) => log("синхронизация", e));
         host.watchContext();
         host.watchVs();
-        log("Moon Core активирован");
+        X.whatsNew(context).catch((e) => log("что нового", e));
+        log("Moon Core активирован" + (host.safeMode() ? " (безопасный режим)" : ""));
         return makeApi(context);
     } catch (e) {
         log("активация", e);

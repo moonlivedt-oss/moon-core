@@ -36,6 +36,8 @@
 
     function renderMap() {
         des.panel.appendChild(h("div", "mc-note mc-pad", "Всё, что есть в окне VS Code. Галочка — показывать или нет, «Настроить» — размер, шрифт, цвет и настройки элемента. Скрытое возвращается здесь же."));
+        var rows = [], search = mapSearch(rows);
+        des.panel.appendChild(search.input);
         ZONES.forEach(function (z) {
             var entries = CATALOG.filter(function (e) { return e.zone === z.id; });
             if (!entries.length) return;
@@ -60,9 +62,12 @@
                 row.appendChild(go);
                 if (e.selector) hoverHighlight(row, e.selector, false);
                 sec.appendChild(row);
-                if (e.list && n > 0) sec.appendChild(renderList(e));
+                var sub = e.list && n > 0 ? sec.appendChild(renderList(e)) : null;
+                // Ищем по названию элемента, зоны и по названиям его настроек.
+                rows.push({ node: row, extra: sub, sec: sec, text: (e.label + " " + z.label + " " + (e.settings || []).map(function (s) { return s.label + " " + s.key; }).join(" ")).toLowerCase() });
             });
         });
+        if (des.mapQuery) search.apply();
     }
 
     /**

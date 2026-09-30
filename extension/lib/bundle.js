@@ -35,6 +35,7 @@ function makeBundle(src, opts) {
         const r = src.design.rules[sel];
         rules[sel] = { label: r.label || "", props: Object.assign({}, r.props) };
         if (r.fp) rules[sel].fp = r.fp;
+        if (r.off) rules[sel].off = true;
     });
     const settings = {};
     Object.keys((src.design && src.design.settings) || {}).forEach((k) => { settings[k] = src.design.settings[k].value; });
@@ -121,6 +122,7 @@ function parseBundle(raw) {
     Object.keys(tmp.rules).forEach((sel) => {
         design.rules[sel] = { label: tmp.rules[sel].label, props: tmp.rules[sel].props };
         if (tmp.rules[sel].fp) design.rules[sel].fp = tmp.rules[sel].fp;
+        if (rules[sel] && rules[sel].off === true) design.rules[sel].off = true;
     });
     return {
         ok: true,
@@ -139,6 +141,7 @@ function designOps(bundle) {
     Object.keys(bundle.design.rules).forEach((sel) => {
         const r = bundle.design.rules[sel];
         Object.keys(r.props).forEach((k) => ops.push({ op: "set", selector: sel, prop: k, value: r.props[k], label: r.label, fp: r.fp }));
+        if (r.off) ops.push({ op: "toggleRule", selector: sel, off: true });
     });
     Object.keys(bundle.design.settings).forEach((k) => ops.push({ op: "setting", key: k, value: bundle.design.settings[k] }));
     Object.keys(bundle.design.colors || {}).forEach((k) => ops.push({ op: "color", key: k, value: bundle.design.colors[k] }));

@@ -126,6 +126,7 @@
         ctl.appendChild(col);
         ctl.appendChild(h("span", "mc-note", key.slice(3)));
         row.appendChild(ctl);
+        colorExtras(col, ctl, row);
         row.appendChild(xBtn(!!rec, function () { setColor(key, null, label, token); flushOps(); renderPanel(true); }, "Вернуть цвет темы"));
         return row;
     }

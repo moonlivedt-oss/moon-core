@@ -20,12 +20,14 @@
         afterDS();
         // VS Code перерисовывает статусбар и титлбар — свои кнопки возвращаем на место.
         setInterval(function () { try { ensureButtons(); } catch (e) {} }, 1500);
+        try { safeBadge(); } catch (e) {}
         // Контекст окна (язык, ветка...) — спросить свой хост сразу, не дожидаясь событий.
         setTimeout(function () { rpcFirst("context", {}, ownToken && hosts[ownToken] ? hosts[ownToken] : null).then(function (r) { if (r && r.ok) applyCtx(r); }); }, 1500);
     });
 
     refreshHosts();
     setInterval(refreshHosts, 5000);
+    setInterval(function () { Object.keys(hosts).forEach(function (t) { if (hosts[t].open) sendHello(hosts[t]); }); }, 60000);
     // VS Code перестраивает DOM — наши <style> могли выпасть из <head>. Наблюдатель за <head>
     // возвращает их сразу и без опроса; редкий таймер — страховка (и путь без MutationObserver).
     var cssHealT = null;
@@ -73,6 +75,7 @@
         /** Защита запуска (зовёт первая строка файла модуля): пропустить ли модуль id. */
         _skip: function (id) {
             modRan[id] = true;
+            if (SAFE) return true;                       // безопасный режим: модули не запускаются
             var s = skipAll || (skipOne && skipOne === id);
             if (s && skipped.indexOf(id) === -1) skipped.push(id);
             return !!s;
@@ -103,6 +106,8 @@
         applyPreview: applyPreview,
         checkAll: checkAll,
         fail: function (id, e) { report("выполнение", e, id); },
+        /** «Стоп-кран»: выключить (true) или включить (false) все стили Moon Core в этом окне. Без аргумента — переключить. */
+        panic: function (on) { return setPanic(on === undefined ? !panicOn : on); },
         /** Помощник модуля (null — модуль не впечатан). */
         module: moduleApi,
         /** Загрузить ленивый (или снова включить выключенный) модуль: Promise<boolean>. */
@@ -113,7 +118,8 @@
         shared: { get: function (k) { return sharedGet(k); }, on: function (k, fn) { return sharedOn(k, fn); } },
         info: function () {
             return {
-                rev: rev, domReady: domReady,
+                rev: rev, domReady: domReady, safe: SAFE, panic: panicOn, win: WIN_ID,
+                stopped: Object.keys(crashed),
                 css: Object.keys(styles), js: Object.keys(running), previews: Object.keys(previews),
                 design: { rules: Object.keys(DS.rules).length, settings: Object.keys(DS.settings).length, on: !!des, queued: opQueue.length },
                 hosts: Object.keys(hosts).map(function (t) { return { port: hosts[t].port, open: hosts[t].open, own: isOwnHost(t) }; }),

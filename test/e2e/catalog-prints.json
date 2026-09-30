@@ -1,6 +1,6 @@
 {
   "vscode": "1.139.1",
-  "at": "2026-09-29",
+  "at": "2026-09-30",
   "prints": {
     "banner": {
       "alts": [
@@ -285,8 +285,7 @@
       "pcls": [
         "tabs-container"
       ],
-      "cat": "tab",
-      "whole": true,
+      "cat": "tabActive",
       "one": true
     },
     "editorActions": {
@@ -496,6 +495,119 @@
       ],
       "cat": "statusItem",
       "whole": true
+    },
+    "sash": {
+      "tag": "div",
+      "cls": [
+        "monaco-sash",
+        "horizontal"
+      ],
+      "pcls": [
+        "sash-container"
+      ],
+      "cat": "sash",
+      "whole": true
+    },
+    "explorer": {
+      "alts": [
+        "div.explorer-folders-view.file-icon-themable-tree.show-file-icons",
+        "#workbench\\.view\\.explorer div.explorer-folders-view.file-icon-themable-tree",
+        "div.explorer-folders-view.file-icon-themable-tree:has([aria-label=\"Files Explorer\"])"
+      ],
+      "tag": "div",
+      "cls": [
+        "explorer-folders-view",
+        "file-icon-themable-tree",
+        "show-file-icons",
+        "align-icons-and-twisties"
+      ],
+      "pcls": [
+        "pane-body"
+      ],
+      "cat": "explorer",
+      "whole": true,
+      "one": true
+    },
+    "listRow": {
+      "alts": [
+        "div.monaco-list.list_id_3.mouse-support div.monaco-list-row",
+        "div.monaco-list-row[aria-label=\"sample.js\"]",
+        "div[aria-label=\"sample.js\"]",
+        "[role=\"treeitem\"][aria-label=\"sample.js\"]"
+      ],
+      "tag": "div",
+      "aria": "sample.js",
+      "role": "treeitem",
+      "text": "sample.js",
+      "cls": [
+        "monaco-list-row"
+      ],
+      "pcls": [
+        "monaco-list-rows"
+      ],
+      "cat": "listRow",
+      "whole": true,
+      "one": true
+    },
+    "auxbar": {
+      "alts": [
+        "#workbench\\.parts\\.auxiliarybar",
+        "div.part.auxiliarybar:has([aria-label=\"Active View Switcher\"])"
+      ],
+      "tag": "div",
+      "id": "workbench.parts.auxiliarybar",
+      "role": "none",
+      "cls": [
+        "part",
+        "auxiliarybar",
+        "basepanel",
+        "right",
+        "pane-composite-part",
+        "floating-part-outer-right"
+      ],
+      "pcls": [
+        "split-view-view"
+      ],
+      "cat": "auxbar",
+      "whole": true,
+      "one": true
+    },
+    "tabActive": {
+      "alts": [
+        "div.tab.tab-actions-right.sizing-fit",
+        "div.tab.tab-actions-right[aria-label=\"sample.js, preview\"]",
+        "[role=\"tab\"][aria-label=\"sample.js, preview\"]"
+      ],
+      "tag": "div",
+      "aria": "sample.js, preview",
+      "role": "tab",
+      "cls": [
+        "tab",
+        "tab-actions-right",
+        "sizing-fit",
+        "tab-border-bottom",
+        "tab-border-top",
+        "connected-tab-left-edge"
+      ],
+      "pcls": [
+        "tabs-container"
+      ],
+      "cat": "tabActive",
+      "whole": true,
+      "one": true
+    },
+    "lineHighlight": {
+      "alts": [
+        "div.current-line.current-line-exact"
+      ],
+      "tag": "div",
+      "cls": [
+        "current-line",
+        "current-line-exact"
+      ],
+      "cat": "lineHighlight",
+      "whole": true,
+      "one": true
     }
   }
 }

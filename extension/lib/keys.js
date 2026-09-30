@@ -30,6 +30,8 @@ const K = {
     WANT_INJECTED: "mooncore.wantInjected",
     SRI_OFF_FOR: "mooncore.sriUnsupportedFor",
     UI_INLINE_FOR: "mooncore.uiInlineFor",
+    SAFE_MODE: "mooncore.safeMode",                          // true — безопасный режим (без сниппетов, правок и модулей)
+    SEEN_VERSION: "mooncore.seenVersion",                    // версия расширения, о которой уже рассказали «Что нового»
 };
 
 /** Ключи-разрешения: их сбрасывает «Отозвать все разрешения» (журнал остаётся — в нём сам отзыв). */

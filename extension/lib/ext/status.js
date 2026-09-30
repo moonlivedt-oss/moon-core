@@ -19,20 +19,32 @@ function createStatus(context, host) {
         const injected = st.length && st.every((s) => s.injected);
         const b = host.bridge.status();
         const pending = (host.jsPending || []).length;
+        const safe = host.safeMode();
+        const stale = host.windowsInfo().filter((w) => w.stale).length;
         // Своя иконка (полумесяц), не $(paintcan): ведёрко похоже на значок Custom CSS and JS.
-        const text = (injected ? "$(color-mode)" : "$(warning)") + " Moon" + (b.streams ? "" : " $(debug-disconnect)");
-        const tooltip = "Moon Core\n" +
-            "Оболочка: " + (injected ? "внедрено" : "не внедрено") + "\n" +
-            "Окон на связи: " + b.streams + "\n" +
-            "Сниппетов включено: " + host.state.snippets.length + " из " + host.list.length + "\n" +
-            (pending ? "JS-сниппетов ждут одобрения: " + pending + "\n" : "") +
-            "\nКлик — меню: конструктор, профили, починка";
+        const text = (safe ? "$(shield)" : injected ? "$(color-mode)" : "$(warning)") + " Moon" + (safe ? ": безопасный режим" : "") + (b.streams ? "" : " $(debug-disconnect)");
+        const ps = host.engine.summary();
+        // Подсказка со ссылками: из неё можно сразу открыть нужное, не заходя в меню.
+        const lines = [
+            "**Moon Core**" + (safe ? " — безопасный режим" : ""), "",
+            (injected ? "$(pass) Встроен в VS Code" : "$(warning) Не встроен — [встроить](command:moonCore.inject)") + " · окон на связи: " + b.streams,
+            "Вид: " + (ps.active ? "профиль «" + ps.active.replace(/[\[\]()*_`\\]/g, "") + "»" + (ps.dirty ? " (изменён)" : "") : "правок " + host.engine.editCount()) +
+                " · сниппетов " + host.state.snippets.length + " из " + host.list.length,
+        ];
+        if (safe) lines.push("$(shield) Сниппеты, правки и модули отключены — [выйти из безопасного режима](command:moonCore.safeMode)");
+        if (pending) lines.push("$(warning) JS-сниппетов ждут одобрения: " + pending);
+        if (stale) lines.push("$(warning) Окон со старым рантаймом: " + stale + " — [перезагрузить это окно](command:workbench.action.reloadWindow)");
+        lines.push("", "[Конструктор](command:moonCore.design) · [Профили](command:moonCore.profile) · [Галерея](command:moonCore.gallery) · [Доктор](command:moonCore.doctor)", "", "Клик — всё меню");
+        const tooltip = lines.join("\n\n").replace(/\n\n\n\n/g, "\n\n");
         const key = text + "|" + tooltip + "|" + !!injected;
         if (key === last) return;                    // не дёргать статусбар без изменений
         last = key;
         item.text = text;
-        item.tooltip = tooltip;
-        item.backgroundColor = injected ? undefined : new vscode.ThemeColor("statusBarItem.warningBackground");
+        const md = new vscode.MarkdownString(tooltip, true);
+        // Ссылки-команды — только эти: подсказка не должна уметь больше, чем меню.
+        md.isTrusted = { enabledCommands: ["moonCore.inject", "moonCore.safeMode", "moonCore.design", "moonCore.profile", "moonCore.gallery", "moonCore.doctor", "workbench.action.reloadWindow"] };
+        item.tooltip = md;
+        item.backgroundColor = injected && !safe ? undefined : new vscode.ThemeColor("statusBarItem.warningBackground");
     };
     update();
     const t = setInterval(update, 5000);
@@ -51,22 +63,33 @@ async function menu() {
         { label: "$(layout) Конструктор", description: "кликни по элементу окна — убрать, увеличить, перекрасить", cmd: "moonCore.design" },
         { label: "$(symbol-color) Профили вида", description: "готовые наборы: Минимал, Только код, Крупный и свои", cmd: "moonCore.profile" },
         { label: "$(inspect) Пипетка", description: "навести на элемент и скрыть его одним кликом", cmd: "moonCore.pick" },
+        { label: "$(sparkle) Галерея стилей", description: "готовые улучшения вида — включаются галочками", cmd: "moonCore.gallery" },
+        { label: "$(discard) Отменить последнюю правку", description: "шаг назад в конструкторе", cmd: "moonCore.undo" },
+        { label: "$(redo) Вернуть отменённую правку", cmd: "moonCore.redo" },
         { label: "$(discard) Вернуть исходный вид", description: "снять все изменения конструктора", cmd: "moonCore.designReset" },
+        { label: "$(history) Восстановить сниппеты из копии", description: "версии, перезаписанные при загрузке вида", cmd: "moonCore.restoreSnippets" },
+        { label: "$(history) Восстановить вид из резервной копии", description: "копии делаются сами перед профилем, сбросом и загрузкой", cmd: "moonCore.restoreBackup" },
+        { label: "$(arrow-right) Следующий профиль", description: "переключить вид по кругу", cmd: "moonCore.profileNext" },
+        { label: "$(copy) Скопировать вид в буфер", description: "правки и профили текстом — переслать или вставить на другом компьютере", cmd: "moonCore.copyLook" },
+        { label: "$(clippy) Вставить вид из буфера", cmd: "moonCore.pasteLook" },
         { label: "$(export) Сохранить вид в файл", description: "чтобы перенести на другой компьютер", cmd: "moonCore.exportAll" },
         { label: "$(desktop-download) Загрузить вид из файла", cmd: "moonCore.importAll" },
         { label: "$(sync) Загрузить вид из синхронизации", description: "если включена moonCore.sync", cmd: "moonCore.syncPull" },
         { label: "$(root-folder) Сохранить вид в проект", description: "вид будет включаться в этой папке", cmd: "moonCore.saveProjectProfile" },
         sep("Если что-то не работает"),
         { label: "$(heart) Доктор", description: "что не так и кнопки починки — начни с него", cmd: "moonCore.doctor" },
+        { label: "$(shield) Безопасный режим", description: "временно отключить сниппеты, правки и модули — ничего не удаляя", cmd: "moonCore.safeMode" },
         { label: "$(checklist) Проверить элементы", description: "какие правки перестали работать после обновления VS Code", cmd: "moonCore.checkSelectors" },
         { label: "$(plug) Внедрить в VS Code", description: "нужно после установки и после обновления VS Code", cmd: "moonCore.inject" },
         { label: "$(window) Вид окна", description: "прозрачность, акрил, поверх всех окон", cmd: "moonCore.windowLook" },
+        { label: "$(browser) Стили внутри webview", description: "свой CSS для страниц расширений и превью Markdown", cmd: "moonCore.webviewStyles" },
         { label: "$(rocket) Глубокая интеграция", description: "сервисы окна и главный процесс VS Code", cmd: "moonCore.deep" },
         { label: "$(trash) Убрать из VS Code", description: "вернуть VS Code как было до Moon Core", cmd: "moonCore.remove" },
         sep("Для разработчиков"),
         { label: "$(new-file) Новый CSS-сниппет", description: "свои стили в файле", cmd: "moonCore.newCss" },
         { label: "$(symbol-event) Новый JS-сниппет", description: "свой скрипт в окне VS Code", cmd: "moonCore.newJs" },
         { label: "$(folder-opened) Папка сниппетов", cmd: "moonCore.openFolder" },
+        { label: "$(cloud-download) Перенести из Custom CSS and JS Loader", description: "файлы старого загрузчика — в сниппеты", cmd: "moonCore.importCustomCss" },
         { label: "$(refresh) Перезапустить сниппеты", cmd: "moonCore.reloadSnippets" },
         { label: "$(extensions) Модули", description: "какие модули встраивать вместе с Moon Core", cmd: "moonCore.modules" },
         { label: "$(new-folder) Создать модуль", description: "папка с заготовкой и типами", cmd: "moonCore.newModule" },

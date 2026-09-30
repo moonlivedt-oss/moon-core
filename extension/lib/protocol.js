@@ -31,8 +31,9 @@ const PROTOCOL = {
     //   context — контекст окна этого хоста (язык, ветка, проект, тема);
     //   uiFailed — интерфейс окна (конструктор) не загрузился отдельным файлом { reason, sha }.
     //   vsSubscribe — модуль подписывается на события VS Code { id, kinds } (подтверждается раз в минуту);
-    //   modCommands — команды модуля для палитры и контекстного меню { id, commands }.
-    METHODS: ["picked", "report", "command", "log", "design", "module", "moduleData", "focus", "timing", "moduleCode", "pickCommand", "native", "uiClick", "context", "uiFailed", "vsSubscribe", "modCommands"],
+    //   modCommands — команды модуля для палитры и контекстного меню { id, commands };
+    //   hello   — пульс окна { win, version, rev }: хост знает, какие окна живы и какой в них рантайм.
+    METHODS: ["picked", "report", "command", "log", "design", "module", "moduleData", "focus", "timing", "moduleCode", "pickCommand", "native", "uiClick", "context", "uiFailed", "vsSubscribe", "modCommands", "hello"],
     // События потока (SSE /events/<токен>).
     //   state   — полный набор сниппетов (приходит и сразу после подключения);
     //   preview — несохранённая правка CSS-сниппета (живой предпросмотр);

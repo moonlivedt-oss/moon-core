@@ -1,7 +1,7 @@
 {
   "name": "moon-core",
   "displayName": "Moon Core",
-  "description": "Переделай интерфейс VS Code под себя: конструктор (убрать, увеличить, перекрасить любой элемент), живые CSS/JS-сниппеты, пипетка, проверка селекторов. Ноль зависимостей.",
+  "description": "Переделай интерфейс VS Code под себя: конструктор (убрать, увеличить, перекрасить любой элемент), готовые профили и стили, живые CSS/JS-сниппеты, отмена правок, безопасный режим. Ноль зависимостей.",
   "version": "0.1.0",
   "publisher": "moonlivedt",
   "author": "moonlivedt (MoonLightDeath)",
@@ -56,6 +56,10 @@
     "views": {
       "moonCore": [
         {
+          "id": "moonCore.look",
+          "name": "Вид"
+        },
+        {
           "id": "moonCore.snippets",
           "name": "Сниппеты"
         }
@@ -64,7 +68,7 @@
     "viewsWelcome": [
       {
         "view": "moonCore.snippets",
-        "contents": "Moon Core меняет интерфейс VS Code под тебя.\n[Открыть конструктор](command:moonCore.design)\nКликни по любому элементу окна — убрать, увеличить, перекрасить. Всё отменяется во вкладке «Правки».\n[Профили вида](command:moonCore.profile)\nГотовые наборы: Минимал, Только код, Крупный.\nЧто-то не работает? [Доктор](command:moonCore.doctor) покажет, что не так, и починит.\n\nДля разработчиков — свои стили и скрипты (появятся здесь списком):\n[Новый CSS-сниппет](command:moonCore.newCss)\n[Новый JS-сниппет](command:moonCore.newJs)"
+        "contents": "Свои стили и скрипты для окна VS Code появятся здесь списком.\n[Галерея готовых стилей](command:moonCore.gallery)\nВключаются галочками, код писать не нужно.\n[Новый CSS-сниппет](command:moonCore.newCss)\n[Новый JS-сниппет](command:moonCore.newJs)"
       }
     ],
     "commands": [
@@ -253,6 +257,77 @@
         "command": "moonCore.moduleCommandsHere",
         "title": "Moon Core: команды модулей для этого места",
         "category": "Moon Core"
+      },
+      {
+        "command": "moonCore.safeMode",
+        "title": "Безопасный режим (временно отключить сниппеты, правки и модули)",
+        "category": "Moon Core",
+        "icon": "$(shield)"
+      },
+      {
+        "command": "moonCore.restoreBackup",
+        "title": "Восстановить вид из резервной копии",
+        "category": "Moon Core",
+        "icon": "$(history)"
+      },
+      {
+        "command": "moonCore.undo",
+        "title": "Отменить последнюю правку конструктора",
+        "category": "Moon Core",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "moonCore.redo",
+        "title": "Вернуть отменённую правку конструктора",
+        "category": "Moon Core",
+        "icon": "$(redo)"
+      },
+      {
+        "command": "moonCore.gallery",
+        "title": "Галерея готовых стилей",
+        "category": "Moon Core",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "moonCore.applyProfile",
+        "title": "Применить профиль вида",
+        "category": "Moon Core"
+      },
+      {
+        "command": "moonCore.profileNext",
+        "title": "Следующий профиль вида",
+        "category": "Moon Core",
+        "icon": "$(arrow-right)"
+      },
+      {
+        "command": "moonCore.copyLook",
+        "title": "Скопировать вид в буфер обмена",
+        "category": "Moon Core",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "moonCore.pasteLook",
+        "title": "Вставить вид из буфера обмена",
+        "category": "Moon Core",
+        "icon": "$(clippy)"
+      },
+      {
+        "command": "moonCore.importCustomCss",
+        "title": "Перенести файлы из Custom CSS and JS Loader",
+        "category": "Moon Core",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "moonCore.webviewStyles",
+        "title": "Стили внутри webview (страницы расширений, превью Markdown)",
+        "category": "Moon Core",
+        "icon": "$(browser)"
+      },
+      {
+        "command": "moonCore.restoreSnippets",
+        "title": "Восстановить сниппеты из копии",
+        "category": "Moon Core",
+        "icon": "$(history)"
       }
     ],
     "menus": {
@@ -366,6 +441,106 @@
           "command": "moonCore.deep",
           "when": "view == moonCore.snippets",
           "group": "2_fix@4"
+        },
+        {
+          "command": "moonCore.design",
+          "when": "view == moonCore.look",
+          "group": "navigation@1"
+        },
+        {
+          "command": "moonCore.gallery",
+          "when": "view == moonCore.look",
+          "group": "navigation@2"
+        },
+        {
+          "command": "moonCore.undo",
+          "when": "view == moonCore.look",
+          "group": "navigation@3"
+        },
+        {
+          "command": "moonCore.doctor",
+          "when": "view == moonCore.look",
+          "group": "navigation@4"
+        },
+        {
+          "command": "moonCore.redo",
+          "when": "view == moonCore.look",
+          "group": "1_view@1"
+        },
+        {
+          "command": "moonCore.restoreBackup",
+          "when": "view == moonCore.look",
+          "group": "1_view@2"
+        },
+        {
+          "command": "moonCore.designReset",
+          "when": "view == moonCore.look",
+          "group": "1_view@3"
+        },
+        {
+          "command": "moonCore.exportAll",
+          "when": "view == moonCore.look",
+          "group": "1_view@4"
+        },
+        {
+          "command": "moonCore.importAll",
+          "when": "view == moonCore.look",
+          "group": "1_view@5"
+        },
+        {
+          "command": "moonCore.safeMode",
+          "when": "view == moonCore.look",
+          "group": "2_fix@1"
+        },
+        {
+          "command": "moonCore.checkSelectors",
+          "when": "view == moonCore.look",
+          "group": "2_fix@2"
+        },
+        {
+          "command": "moonCore.gallery",
+          "when": "view == moonCore.snippets",
+          "group": "3_dev@0"
+        },
+        {
+          "command": "moonCore.safeMode",
+          "when": "view == moonCore.snippets",
+          "group": "2_fix@5"
+        },
+        {
+          "command": "moonCore.restoreBackup",
+          "when": "view == moonCore.snippets",
+          "group": "1_view@7"
+        },
+        {
+          "command": "moonCore.profileNext",
+          "when": "view == moonCore.look",
+          "group": "1_view@0"
+        },
+        {
+          "command": "moonCore.copyLook",
+          "when": "view == moonCore.look",
+          "group": "1_view@6"
+        },
+        {
+          "command": "moonCore.pasteLook",
+          "when": "view == moonCore.look",
+          "group": "1_view@7"
+        },
+        {
+          "command": "moonCore.importCustomCss",
+          "when": "view == moonCore.snippets",
+          "group": "3_dev@9"
+        },
+        {
+          "command": "moonCore.webviewStyles",
+          "when": "view == moonCore.snippets",
+          "group": "3_dev@2a"
+        },
+        {
+          "command": "moonCore.restoreSnippets",
+          "when": "view == moonCore.snippets",
+          "group": "1_view@8"
         }
       ],
       "view/item/context": [
@@ -405,6 +580,10 @@
         {
           "command": "moonCore.moduleCommandsHere",
           "when": "false"
+        },
+        {
+          "command": "moonCore.applyProfile",
+          "when": "false"
         }
       ],
       "editor/context": [
@@ -420,6 +599,11 @@
         "command": "moonCore.pick",
         "key": "ctrl+alt+shift+c",
         "mac": "cmd+alt+shift+c"
+      },
+      {
+        "command": "moonCore.safeMode",
+        "key": "ctrl+alt+shift+f12",
+        "mac": "cmd+alt+shift+f12"
       }
     ],
     "configuration": {
@@ -636,8 +820,85 @@
               "description": "Материал фона Windows 11 (виден там, где интерфейс прозрачный)"
             }
           }
+        },
+        "moonCore.logLevel": {
+          "type": "string",
+          "enum": [
+            "all",
+            "errors",
+            "off"
+          ],
+          "default": "all",
+          "scope": "machine",
+          "enumDescriptions": [
+            "Писать всё",
+            "Только записи с ошибками",
+            "Журнал выключен (последние строки всё равно попадают в отчёт Доктора)"
+          ],
+          "description": "Что писать в журнал Moon Core (Output и файл mooncore.log)."
+        },
+        "moonCore.webviewStyles": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine",
+          "markdownDescription": "Стили внутри webview: CSS из сниппетов `webview*.css` дописывается в файл VS Code, из которого собираются все webview (страницы расширений, превью Markdown). Бэкап рядом, снятие возвращает файл байт в байт. Файл, уже изменённый другой программой, Moon Core не трогает. Включать командой `Moon Core: Стили внутри webview`."
         }
       }
-    }
+    },
+    "walkthroughs": [
+      {
+        "id": "moonCore.start",
+        "title": "Moon Core: первые шаги",
+        "description": "Как переделать интерфейс VS Code под себя и ничего не сломать.",
+        "steps": [
+          {
+            "id": "inject",
+            "title": "Встроить Moon Core в VS Code",
+            "description": "Moon Core встраивается сам при первом запуске — остаётся перезагрузить окно. Если что-то пошло не так, Доктор покажет причину и кнопку починки.\n[Открыть Доктор](command:moonCore.doctor)",
+            "media": {
+              "markdown": "media/walk/inject.md"
+            },
+            "completionEvents": [
+              "onCommand:moonCore.doctor"
+            ]
+          },
+          {
+            "id": "design",
+            "title": "Кликни по любому элементу окна",
+            "description": "Конструктор: убрать, увеличить, перекрасить кнопку, вкладку, панель. Любая правка отменяется — Ctrl+Z.\n[Открыть конструктор](command:moonCore.design)",
+            "media": {
+              "markdown": "media/walk/design.md"
+            },
+            "completionEvents": [
+              "onCommand:moonCore.design"
+            ]
+          },
+          {
+            "id": "profile",
+            "title": "Готовые профили и стили",
+            "description": "Профиль меняет вид одним щелчком: Минимал, Только код, Дзен, Презентация, Компактный, Крупный. Галерея добавляет стили галочками.\n[Профили вида](command:moonCore.profile)\n[Галерея стилей](command:moonCore.gallery)",
+            "media": {
+              "markdown": "media/walk/profile.md"
+            },
+            "completionEvents": [
+              "onCommand:moonCore.profile",
+              "onCommand:moonCore.gallery"
+            ]
+          },
+          {
+            "id": "safe",
+            "title": "Если что-то сломалось",
+            "description": "Три страховки: Ctrl+Alt+Shift+Backspace выключает стили в окне, безопасный режим отключает всё во всех окнах, резервные копии возвращают прежний вид.\n[Безопасный режим](command:moonCore.safeMode)\n[Резервные копии вида](command:moonCore.restoreBackup)",
+            "media": {
+              "markdown": "media/walk/safe.md"
+            },
+            "completionEvents": [
+              "onCommand:moonCore.safeMode",
+              "onCommand:moonCore.restoreBackup"
+            ]
+          }
+        ]
+      }
+    ]
   }
 }

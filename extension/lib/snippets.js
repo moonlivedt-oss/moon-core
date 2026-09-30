@@ -21,6 +21,13 @@ const ID_RE = /^[A-Za-z0-9][\w.-]{0,63}\.(css|js)$/;
 
 function validId(id) { return typeof id === "string" && ID_RE.test(id) && id.indexOf("..") === -1; }
 function kindOf(id) { return /\.js$/i.test(id) ? "js" : "css"; }
+/** Сниппет для webview (webview*.css): применяется не к окну, а внутри страниц расширений (lib/webview-patch.js). */
+function isWebview(id) { return /^webview[\w.-]*\.css$/i.test(String(id)); }
+/** CSS всех включённых webview-сниппетов папки (по порядку имён) — то, что вписывается в основу webview. */
+function webviewCss(dir, meta) {
+    return listSnippets(dir, meta).filter((s) => isWebview(s.id) && s.enabled && !s.error && s.code.trim())
+        .map((s) => "/* " + s.id + " */\n" + s.code.trim()).join("\n");
+}
 
 function readMeta(file) {
     try {
@@ -75,6 +82,18 @@ function writeState(file, state) {
     return true;
 }
 
+/**
+ * Куда CSS обращается в сеть: узлы из url(http...), url(//...) и @import. Стиль из чужого пакета
+ * с таким адресом при каждом запуске VS Code сообщает автору пакета твой IP и время запуска.
+ */
+function cssNetworkHosts(code) {
+    const out = new Set();
+    const re = /(?:url\(\s*|@import\s+)["']?\s*(?:https?:)?\/\/([^\s"')\/]{1,200})/gi;
+    let m;
+    while ((m = re.exec(String(code || ""))) && out.size < 20) out.add(m[1].toLowerCase());
+    return Array.from(out);
+}
+
 /** Свободное имя вида base.css, base-2.css, ... */
 function freeId(dir, base, ext) {
     const clean = String(base || "snippet").toLowerCase().replace(/[^a-z0-9_.-]+/g, "-").replace(/^[-.]+|[-.]+$/g, "").slice(0, 50) || "snippet";
@@ -85,4 +104,4 @@ function freeId(dir, base, ext) {
     return clean + "-" + Date.now() + "." + ext;
 }
 
-module.exports = { validId, kindOf, readMeta, writeMeta, listSnippets, buildState, writeState, freeId };
+module.exports = { isWebview, webviewCss, cssNetworkHosts, validId, kindOf, readMeta, writeMeta, listSnippets, buildState, writeState, freeId };

@@ -49,6 +49,7 @@
         rec.es.onopen = function () {
             stage("bridge"); rec.errors = 0; rec.open = true;
             if (hasFocus() && !ownToken) probeOwnHost();
+            sendHello(rec);
             // Новый (или вернувшийся) хост не знает подписок модулей на события VS Code и их команд.
             setTimeout(function () { try { vsResubscribe(null); } catch (e) {} }, 0);
         };
@@ -75,6 +76,10 @@
         on(rec, "ctx", function (d) { onCtx(rec, d); });
         on(rec, "vs", function (d) { deliverVs(rec, d); });
         on(rec, "moduleSet", function (d) { applyModuleSet(rec, d); });
+    }
+    /** Пульс: хост узнаёт, что окно живо и какой в нём рантайм (Доктор покажет окна со старым). */
+    function sendHello(rec) {
+        try { rpc(rec, "hello", { win: WIN_ID, version: BOOT.version || "", rev: rev, safe: SAFE }); } catch (e) {}
     }
     function on(rec, ev, fn) {
         rec.es.addEventListener(ev, function (e) {

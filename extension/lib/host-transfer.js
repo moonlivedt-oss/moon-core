@@ -12,7 +12,8 @@ const S = require("./snippets");
 const B = require("./bundle");
 const { MAX_PROFILES } = require("./engine");
 const { log } = require("./log");
-const { metaFile, writeAtomic } = require("./storage");
+const { metaFile, writeAtomic, backupsDir } = require("./storage");
+const BK = require("./backups");
 
 class TransferPart {
     // ---------------- перенос между машинами ----------------
@@ -33,6 +34,11 @@ class TransferPart {
         if (b.snippets) {
             const meta = S.readMeta(metaFile(this.context));
             const off = new Set(meta.disabled);
+            // Сниппеты с теми же именами будут перезаписаны — прежние версии уходят в резервную папку.
+            try {
+                const kept = BK.saveSnippets(backupsDir(this.context), b.snippets.map((s) => this.fileOf(s.id)).filter((f) => fs.existsSync(f)));
+                if (kept) log("перезаписываемые сниппеты отложены: " + kept);
+            } catch (e) { log("резервная копия сниппетов", e); }
             for (const s of b.snippets) {
                 writeAtomic(this.fileOf(s.id), s.code);
                 if (s.enabled) off.delete(s.id); else off.add(s.id);
@@ -88,7 +94,9 @@ class TransferPart {
         const b = parsed.bundle;
         const clash = (b.snippets || []).filter((s) => fs.existsSync(this.fileOf(s.id))).map((s) => s.id);
         const js = (b.snippets || []).filter((s) => S.kindOf(s.id) === "js").map((s) => s.id);
+        const net = Array.from(new Set([].concat.apply([], (b.snippets || []).filter((s) => S.kindOf(s.id) === "css").map((s) => S.cssNetworkHosts(s.code)))));
         const detail = "В пакете: " + B.describe(b) + "." +
+            (net.length ? "\nСтили пакета обращаются в сеть (" + net.slice(0, 6).join(", ") + "): при каждом запуске VS Code автор этих адресов увидит твой IP. Загружай, только если доверяешь пакету." : "") +
             (js.length ? "\nJS-сниппеты выполняются в окне VS Code с полным доступом: " + js.slice(0, 10).join(", ") + ". Загружай только свой пакет." : "") +
             "\nТекущие правки конструктора заменятся, настройки VS Code из них вернутся к исходным." +
             (clash.length ? "\nПерезапишутся сниппеты: " + clash.slice(0, 10).join(", ") + (clash.length > 10 ? " и ещё " + (clash.length - 10) : "") + "." : "") +

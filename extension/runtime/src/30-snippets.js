@@ -6,21 +6,26 @@
     var styles = {};         // id -> <style>
     var running = {};        // id -> {code, disposers}
     var rev = "";
+    // Предпросмотр стиля, которого ещё нет среди сниппетов (галерея: стиль виден по наведению в
+    // списке, до включения). Такой предпросмотр живёт, пока хост его не снимет.
+    var PREVIEW_ONLY = "gallery-preview.css";
     var domReady = false;
 
     function applyState(st) {
         if (!st || !Array.isArray(st.snippets)) return;
+        SAFE = st.safe === true;
         var next = {};
         st.snippets.slice(0, PROTO.MAX_SNIPPETS).forEach(function (s) {
             if (!s || !ID_RE.test(String(s.id)) || typeof s.code !== "string" || s.code.length > PROTO.MAX_SNIPPET) return;
             next[s.id] = { kind: /\.js$/.test(s.id) ? "js" : "css", code: s.code };
         });
         // Сохранили ровно то, что было в превью, — превью больше не нужно.
-        Object.keys(previews).forEach(function (id) { if (!next[id] || next[id].code === previews[id]) delete previews[id]; });
+        Object.keys(previews).forEach(function (id) { if (id !== PREVIEW_ONLY && (!next[id] || next[id].code === previews[id])) delete previews[id]; });
         saved = next;
         rev = String(st.rev || "");
         adoptDesign(st);
         render(false);
+        try { safeBadge(); } catch (e) {}
     }
 
     function applyPreview(d) {
@@ -33,13 +38,16 @@
     function headEl() { return document.head || document.documentElement; }
 
     function renderCss() {
-        var ids = Object.keys(saved).filter(function (id) { return saved[id].kind === "css"; }).sort();
+        var ids = Object.keys(saved).filter(function (id) { return saved[id].kind === "css"; });
+        if (previews[PREVIEW_ONLY] != null && !saved[PREVIEW_ONLY] && !SAFE) ids.push(PREVIEW_ONLY);
+        ids.sort();
         Object.keys(styles).forEach(function (id) {
             if (ids.indexOf(id) === -1) { try { styles[id].remove(); } catch (e) {} delete styles[id]; }
         });
         var reorder = false;
         ids.forEach(function (id) {
             var code = previews[id] != null ? previews[id] : saved[id].code;
+            if (typeof code !== "string") return;
             var el = styles[id];
             if (!el) {
                 el = document.createElement("style");
@@ -55,6 +63,7 @@
         if (reorder) ids.forEach(function (id) { headEl().appendChild(styles[id]); });
         if (reorder && designStyle) headEl().appendChild(designStyle);
         renderDesignCss();
+        if (panicOn) applyPanic();                 // «стоп-кран» держит выключенными и новые стили
     }
 
     function renderJs(force) {
@@ -64,7 +73,9 @@
         });
         if (!domReady) return;
         Object.keys(saved).sort().forEach(function (id) {
-            if (saved[id].kind === "js" && !running[id]) runJs(id, saved[id].code);
+            // Остановленный за поток ошибок сниппет ждёт нового кода.
+            if (crashed[id] != null && crashed[id] !== saved[id].code) delete crashed[id];
+            if (saved[id].kind === "js" && !running[id] && crashed[id] == null) runJs(id, saved[id].code);
         });
     }
 
@@ -200,22 +211,47 @@
     // ---------------------------------------------------------------------------
     //  Тост.
     // ---------------------------------------------------------------------------
-    var toastEl = null, toastTimer = null;
-    function toast(text) {
+    //  Сообщения складываются стопкой (до TOAST_MAX), каждое гаснет само; повтор того же текста
+    //  не плодит строки, а продлевает уже показанную. kind: "" | "warn" | "error" — цвет рамки
+    //  и время показа.
+    var toastEl = null, toastItems = [], TOAST_MAX = 4;
+    var TOAST_KIND = { warn: ["var(--vscode-editorWarning-foreground, #f9e2af)", 4200], error: ["var(--vscode-errorForeground, #f38ba8)", 6000] };
+    function toastDrop(it) {
+        clearTimeout(it.timer);
+        try { it.el.remove(); } catch (e) {}
+        var i = toastItems.indexOf(it);
+        if (i !== -1) toastItems.splice(i, 1);
+        if (!toastItems.length && toastEl) { try { toastEl.remove(); } catch (e) {} }
+    }
+    function toast(text, kind) {
         if (!document.body) return;
+        text = String(text);
+        var k = TOAST_KIND[kind] || ["var(--vscode-focusBorder, #89b4fa)", 2600];
         if (!toastEl) {
             toastEl = document.createElement("div");
             toastEl.setAttribute("data-mooncore-ui", "toast");
+            toastEl.setAttribute("role", "status");
+            toastEl.setAttribute("aria-live", "polite");
             Object.assign(toastEl.style, {
                 position: "fixed", left: "50%", bottom: "48px", transform: "translateX(-50%)", zIndex: String(Z + 5),
-                padding: "8px 14px", borderRadius: "8px", font: "12px/1.4 var(--vscode-font-family, sans-serif)",
-                background: "var(--vscode-editorWidget-background, #1e1e2e)", color: "var(--vscode-editorWidget-foreground, #cdd6f4)",
-                border: "1px solid var(--vscode-focusBorder, #89b4fa)", boxShadow: "0 6px 24px rgba(0,0,0,.35)", pointerEvents: "none",
-                maxWidth: "70vw", whiteSpace: "pre-wrap",
+                display: "flex", flexDirection: "column", alignItems: "center", gap: "6px", pointerEvents: "none", maxWidth: "70vw",
             });
         }
-        toastEl.textContent = String(text);
-        document.body.appendChild(toastEl);
-        clearTimeout(toastTimer);
-        toastTimer = setTimeout(function () { if (toastEl) toastEl.remove(); }, 2600);
+        var same = null;
+        for (var i = 0; i < toastItems.length; i++) if (toastItems[i].text === text) same = toastItems[i];
+        if (same) { clearTimeout(same.timer); same.timer = setTimeout(function () { toastDrop(same); }, k[1]); return; }
+        var el = document.createElement("div");
+        Object.assign(el.style, {
+            padding: "8px 14px", borderRadius: "8px", font: "12px/1.4 var(--vscode-font-family, sans-serif)",
+            background: "var(--vscode-editorWidget-background, #1e1e2e)", color: "var(--vscode-editorWidget-foreground, #cdd6f4)",
+            border: "1px solid " + k[0], boxShadow: "0 6px 24px rgba(0,0,0,.35)", whiteSpace: "pre-wrap",
+        });
+        el.textContent = text;
+        var it = { el: el, text: text, timer: null };
+        it.timer = setTimeout(function () { toastDrop(it); }, k[1]);
+        toastItems.push(it);
+        while (toastItems.length > TOAST_MAX) toastDrop(toastItems[0]);
+        toastEl.appendChild(el);
+        toastEl.style.bottom = des ? "84px" : "48px";          // над полосой конструктора, а не поверх неё
+        if (!toastEl.isConnected) document.body.appendChild(toastEl);
     }

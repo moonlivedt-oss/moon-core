@@ -9,6 +9,7 @@ const crypto = require("crypto");
 const K = require("./checks");
 const { log, showLog } = require("./log");
 const KEYS = require("./keys");
+const VF = require("./vs-files");
 
 const CHECK_TIMEOUT_MS = 3000;
 
@@ -22,7 +23,12 @@ class CheckPart {
             this.pending.set(reqId, (b) => { clearTimeout(t); this.pending.delete(reqId); resolve(b); });
             this.bridge.broadcast("check", { reqId: reqId, host: this.hostRef(), prints: opts && opts.prints ? opts.prints : undefined });
         });
-        return answer && Array.isArray(answer.results) ? K.summarize(answer.results) : null;
+        const summary = answer && Array.isArray(answer.results) ? K.summarize(answer.results) : null;
+        // Что «точно сломано»: класса из селектора нет в файлах этой версии VS Code (lib/vs-files.js).
+        if (summary && vscode.env && vscode.env.appRoot) { try { VF.annotateCheck(summary, vscode.env.appRoot); } catch (e) { log("проверка по файлам VS Code", e); } }
+        // Подсказки в редакторе CSS-сниппетов (lib/ext/extras.js): что сейчас ничего не находит.
+        if (summary && typeof this.onCheckDone === "function") { try { this.onCheckDone(summary); } catch (e) { log("подсказки проверки", e); } }
+        return summary;
     }
 
     /** Команда «Проверить селекторы». */
@@ -32,7 +38,8 @@ class CheckPart {
         if (!s) { vscode.window.showWarningMessage("Moon Core: окно не ответило на проверку."); return; }
         ["", "=== Проверка селекторов ==="].concat(s.lines).forEach((l) => log(l));
         const total = s.user.total + s.catalog.total, dead = s.user.dead + s.catalog.dead;
-        const msg = dead ? "Moon Core: из " + total + " селекторов ничего не находят " + dead + " (список в журнале). Часть может быть нормой: элемент просто сейчас не показан."
+        const msg = dead ? "Moon Core: из " + total + " селекторов ничего не находят " + dead + " (список в журнале)." +
+            (s.gone ? " Точно сломаны — такого класса в этой версии VS Code больше нет: " + s.gone + "." : "") + " Остальные могут быть нормой: элемент просто сейчас не показан."
             : "Moon Core: все " + total + " селекторов находят элементы.";
         const fix = s.heals.length ? "Починить (" + s.heals.length + ")" : null;
         const pick = await (dead ? vscode.window.showWarningMessage(msg, ...[fix, "Журнал"].filter(Boolean)) : vscode.window.showInformationMessage(msg));

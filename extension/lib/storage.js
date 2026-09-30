@@ -32,10 +32,12 @@ function designFile(context) { return path.join(storageDir(context), "mooncore-d
 function profilesFile(context) { return path.join(storageDir(context), "mooncore-profiles.json"); }
 /** Файлы данных модулей: <id>.json. */
 function modulesDataDir(context) { return path.join(storageDir(context), "modules"); }
+/** Резервные копии вида (lib/backups.js). */
+function backupsDir(context) { return path.join(storageDir(context), "backups"); }
 /** Какие сниппеты выключены. */
 function metaFile(context) { return path.join(storageDir(context), "mooncore-snippets.json"); }
 
 /** Атомарная запись (временный файл + rename с повторами): окно никогда не прочтёт недописанный JSON. */
 const { writeAtomic } = require("./fsx");
 
-module.exports = { modulesDataDir, fileUrl, storageDir, ensureDir, bridgeFile, stateFile, snippetsDir, metaFile, designFile, profilesFile, writeAtomic };
+module.exports = { backupsDir, modulesDataDir, fileUrl, storageDir, ensureDir, bridgeFile, stateFile, snippetsDir, metaFile, designFile, profilesFile, writeAtomic };
