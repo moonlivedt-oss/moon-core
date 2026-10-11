@@ -27,25 +27,7 @@ const CODE_KEY = KEYS.MODULES_CODE;  // id -> { sha, source }
 const TRUST_KEY = KEYS.MODULES_TRUST;
 const CAPS_KEY = KEYS.MODULES_CAPS; // id -> source
 
-/**
- * Все найденные модули: из папок настройки moonCore.modules и из расширений
- * (package.json -> moonCore.modules). Папки идут первыми и при совпадении id побеждают:
- * так при разработке берётся свежая сборка из репозитория, а не копия в установленном расширении.
- */
-function discover() {
-    const results = [];
-    const dirs = vscode.workspace.getConfiguration("moonCore").get("modules", []);
-    (Array.isArray(dirs) ? dirs : []).slice(0, M.LIMITS.MAX_MODULES).forEach((d) => {
-        if (typeof d === "string" && d.trim()) results.push(M.fromFolder(d.trim()));
-    });
-    vscode.extensions.all.forEach((ext) => {
-        const pkg = ext.packageJSON;
-        if (pkg && pkg.moonCore) results.push(...M.fromPackage(pkg, ext.extensionPath, ext.id));
-    });
-    const r = M.collect(results);
-    r.errors.forEach((e) => log("модули: " + e));
-    return r.modules;
-}
+const { discover, discoverErrors, discoverDups, resetDiscoverCache } = require("./module-discover");
 
 function readMap(context, key) {
     const v = context.globalState.get(key);
@@ -373,4 +355,4 @@ async function reviewChanged(context, pending) {
     return changed;
 }
 
-module.exports = { capsOf, approvedCaps, approveCaps, reviewCaps, discover, allowed, reviewNew, autoAllowOwn, isOwn, pickCommand, sourceTitle, vetScripts, reviewChanged, isDev, devIds, devCode, pickDev, createModule, templateRuntime };
+module.exports = { discoverErrors, discoverDups, resetDiscoverCache, capsOf, approvedCaps, approveCaps, reviewCaps, discover, allowed, reviewNew, autoAllowOwn, isOwn, pickCommand, sourceTitle, vetScripts, reviewChanged, isDev, devIds, devCode, pickDev, createModule, templateRuntime };

@@ -339,6 +339,8 @@ require("./runtime/startup.test")(test, { makeWindow, baseBoot, tick });
 require("./runtime/modules2.test")(test, { makeWindow, baseBoot, tick });
 // Страховки окна: безопасный режим, стоп-кран, падающие сниппеты, пульс, сообщения.
 require("./runtime/safety.test")(test, { makeWindow, baseBoot, tick, D });
+// Скорость VS Code: метки старта, подвисания, пульс; таймеры скрытого окна, быстрый мост.
+require("./runtime/perf.test")(test, { makeWindow, baseBoot, tick });
 
 (async () => {
     for (const t of queue) {

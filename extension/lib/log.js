@@ -68,7 +68,8 @@ function flushFile() {
     try {
         let size = 0;
         try { size = fs.statSync(logFile).size; } catch (e) {}
-        if (size + text.length > LOG_MAX) { try { fs.renameSync(logFile, logFile + ".1"); } catch (e) {} }
+        // Размер — в байтах: строки журнала по-русски, символ кириллицы в UTF-8 — два байта.
+        if (size + Buffer.byteLength(text, "utf8") > LOG_MAX) { try { fs.renameSync(logFile, logFile + ".1"); } catch (e) {} }
         fs.appendFileSync(logFile, text, "utf8");
     } catch (e) { /* журнал не должен ронять расширение */ }
 }
@@ -90,25 +91,44 @@ const LEVELS = ["all", "errors", "off"];
 let level = "all";
 function setLogLevel(v) { level = LEVELS.indexOf(v) !== -1 ? v : "all"; return level; }
 
-/** log("текст") или log("где", ошибка). */
-function log(msg, err) {
-    let line = "[" + stamp() + "] " + msg;
-    if (err) line += ": " + (err && err.stack ? err.stack : String(err));
-    const safe = redact(line);
+// Повторы подряд: одна и та же запись (опрос раз в несколько секунд, цикл ошибок окна) не
+// плодит тысячи строк — пишется первая, остальные считаются и сводятся в одну строку
+// «повторилось ещё N раз», когда придёт другая запись или пройдёт REPEAT_FLUSH_MS.
+const REPEAT_FLUSH_MS = 10 * 60000;
+let lastBody = "", repeats = 0, repeatSince = 0;
+
+function emit(safe, quiet) {
     ring.push(safe);
     if (ring.length > RING_MAX) ring.splice(0, ring.length - RING_MAX);
-    const quiet = level === "off" || (level === "errors" && !err);
-    if (!quiet) channel().appendLine(safe);
-    if (logFile && !quiet) {
+    if (quiet) return;
+    channel().appendLine(safe);
+    if (logFile) {
         pendingLines.push(new Date().toISOString().slice(0, 10) + " " + safe);
         if (pendingLines.length > 500) pendingLines.splice(0, pendingLines.length - 500);
         if (!flushTimer) { flushTimer = setTimeout(flushFile, 500); if (flushTimer.unref) flushTimer.unref(); }
     }
+}
+function flushRepeats(quiet) {
+    if (!repeats) return;
+    emit("[" + stamp() + "] (предыдущая запись повторилась ещё " + repeats + " раз)", quiet);
+    repeats = 0;
+}
+
+/** log("текст") или log("где", ошибка). */
+function log(msg, err) {
+    let body = String(msg);
+    if (err) body += ": " + (err && err.stack ? err.stack : String(err));
+    const quiet = level === "off" || (level === "errors" && !err);
     // Прогон в настоящем VS Code (test/e2e) читает журнал из файла: окно Output ему не видно.
-    if (process.env.MOONCORE_LOG_FILE) { try { require("fs").appendFileSync(process.env.MOONCORE_LOG_FILE, safe + "\n", "utf8"); } catch (e) {} }
+    if (process.env.MOONCORE_LOG_FILE) { try { require("fs").appendFileSync(process.env.MOONCORE_LOG_FILE, redact("[" + stamp() + "] " + body) + "\n", "utf8"); } catch (e) {} }
+    const now = Date.now();
+    if (body === lastBody && now - repeatSince < REPEAT_FLUSH_MS) { repeats++; return; }
+    flushRepeats(quiet);
+    lastBody = body; repeatSince = now;
+    emit(redact("[" + stamp() + "] " + body), quiet);
 }
 
 function showLog() { channel().show(true); }
-function disposeLog() { clearTimeout(flushTimer); flushFile(); if (_channel) { try { _channel.dispose(); } catch (e) {} _channel = null; } }
+function disposeLog() { flushRepeats(level === "off"); clearTimeout(flushTimer); flushFile(); if (_channel) { try { _channel.dispose(); } catch (e) {} _channel = null; } }
 
 module.exports = { setLogLevel, LEVELS, log, showLog, disposeLog, redact, redactSecrets, recentLog, setLogFile, logFilePath, flushFile };

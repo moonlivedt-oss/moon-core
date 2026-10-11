@@ -200,6 +200,17 @@
         "icon": "$(heart)"
       },
       {
+        "command": "moonCore.speed",
+        "title": "Скорость VS Code (что тормозит запуск)",
+        "category": "Moon Core",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "moonCore.speedExport",
+        "title": "Сохранить замеры скорости в файл",
+        "category": "Moon Core"
+      },
+      {
         "command": "moonCore.moduleDev",
         "title": "Режим разработки модуля",
         "category": "Moon Core",
@@ -820,6 +831,11 @@
               "description": "Материал фона Windows 11 (виден там, где интерфейс прозрачный)"
             }
           }
+        },
+        "moonCore.speedNotify": {
+          "type": "boolean",
+          "default": true,
+          "description": "Сказать (не чаще раза в сутки), если VS Code запустился заметно медленнее обычного — по истории замеров «Скорости VS Code»."
         },
         "moonCore.logLevel": {
           "type": "string",

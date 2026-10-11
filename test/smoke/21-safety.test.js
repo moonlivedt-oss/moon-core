@@ -84,8 +84,11 @@ test("хост: безопасный режим чистит состояние 
 
     assert.strictEqual(host.onHello({ win: "../x", version: "1" }).ok, false);
     assert.deepStrictEqual(host.onHello({ win: "a1b2c3d4e5f60718", version: "0.1.0", rev: "r" }), { ok: true, version: "0.2.0" });
-    host.onHello({ win: "ffffffffffffffff", version: "0.2.0" });
-    assert.deepStrictEqual(host.windowsInfo(), [{ version: "0.1.0", stale: true }, { version: "0.2.0", stale: false }]);
+    host.onHello({ win: "ffffffffffffffff", version: "0.2.0", perf: { freezes: 3, freezeMs: 900, freezeMax: -5, heapMb: "много", up: 60 } });
+    assert.deepStrictEqual(host.windowsInfo(), [
+        { win: "a1b2c3d4e5f60718", version: "0.1.0", stale: true, perf: null },
+        { win: "ffffffffffffffff", version: "0.2.0", stale: false, perf: { freezes: 3, freezeMs: 900, freezeMax: 0, heapMb: 0, up: 60 } },
+    ]);
     host.windows.get("a1b2c3d4e5f60718").at = Date.now() - 10 * 60000;
     assert.strictEqual(host.windowsInfo().length, 1, "замолчавшее окно забыто");
     for (let i = 0; i < 80; i++) host.onHello({ win: ("0000000000000000" + i.toString(16)).slice(-16), version: "0.2.0" });

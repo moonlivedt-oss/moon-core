@@ -14,6 +14,7 @@ const ACTIONS = [
     ["Вернуть правку", "", "redo", "moonCore.redo"],
     ["Резервные копии вида", "вернуть вид, каким он был раньше", "history", "moonCore.restoreBackup"],
     ["Доктор", "что не так и как починить", "heart", "moonCore.doctor"],
+    ["Скорость VS Code", "что тормозит запуск: расширения, папки, настройки", "dashboard", "moonCore.speed"],
 ];
 
 class LookTree {

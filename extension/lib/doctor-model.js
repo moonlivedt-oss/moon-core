@@ -4,14 +4,14 @@
 //
 //  Снимок (собирает doctor.js):
 //    { vscode, ext, shells: inject.status(), bridge: bridge.status(), timing, modules: {found, allowed,
-//      dev, pending}, design: {rules, settings, active, dirty}, snippets: {total, on, errors, jsPending},
-//      check: summarize()|null, recovery }
+//      dev, pending, dups}, design: {rules, settings, active, dirty}, snippets: {total, on, errors, jsPending},
+//      check: summarize()|null, recovery, speed: {regression, slowExt, freezes}|null }
 //  Проблема: { level: "error"|"warn"|"info", title, detail, fix?: команда страницы, fixLabel? }
 // ============================================================
 "use strict";
 
 const ACTIONS = ["inject", "remove", "reload", "check", "heal", "log", "modules", "moduleDev", "recovery", "design", "refresh", "jsReview", "report", "permissions", "export",
-    "safe", "fixAll", "backups", "gallery", "legacy"];
+    "safe", "fixAll", "backups", "gallery", "legacy", "modulesSetting", "speed"];
 // Починки, которые «Починить всё» выполняет сама, по порядку. Перезагрузка окна — последней и с вопросом.
 const AUTO_FIXES = ["inject", "heal", "jsReview"];
 const SLOW_MODULE_MS = 1500, SLOW_RUNTIME_MS = 400;
@@ -72,6 +72,12 @@ function problems(s) {
     if (noisy.length) add("warn", "Часто падает: " + noisy.map((e) => e.source + " (" + e.n + ")").join(", "), "Ошибки этого источника идут одна за другой — подробности в журнале.", "log", "Журнал");
     if (b.dropped) add("info", "Отключено зависших окон: " + b.dropped, "Окно не читало события моста (стояло в отладчике или зависло) — хост отключил его, чтобы не копить память. Окно переподключится само.");
     const m = s.modules || {};
+    // Один id в папке из moonCore.modules и в установленном расширении: работает копия из папки
+    // (так задумано для разработки), но если папка осталась от прошлого, модуль не обновится
+    // вместе с расширением — об этом стоит знать.
+    (Array.isArray(m.dups) ? m.dups : []).slice(0, 4).forEach((d) => add("info", "Модуль «" + d.id + "» найден дважды",
+        "Работает версия из источника «" + d.used + "», а «" + d.skipped + "» пропускается. Если папка в moonCore.modules больше не нужна для разработки, убери её — тогда модуль будет обновляться вместе с расширением.",
+        "modulesSetting", "Открыть настройку"));
     if (m.pending && m.pending.length) add("warn", "Код модулей изменился и ждёт одобрения: " + m.pending.join(", "), "В оболочке пока прежняя одобренная версия.", "modules", "Модули");
     const sn = s.snippets || {};
     if (sn.jsPending && sn.jsPending.length) add("warn", "JS-сниппеты ждут одобрения: " + sn.jsPending.join(", "), "Их изменили не из VS Code — они не запускаются, пока не одобришь.", "jsReview", "Проверить");
@@ -81,6 +87,16 @@ function problems(s) {
         if (c.heals && c.heals.length) add("warn", "Сломанные правки можно починить: " + c.heals.length, "Moon Core нашёл по отпечаткам, куда переехали элементы: " + c.heals.slice(0, 5).map((h) => h.label || h.from).join(", ") + (c.heals.length > 5 ? " и др." : "") + ".", "heal", "Починить");
         const unhealed = (c.deadUser || []).length - (c.heals ? c.heals.length : 0);
         if (unhealed > 0) add("info", "Правил без совпадений: " + unhealed, "Элемент может быть просто не показан сейчас (закрыта панель). Список — в журнале после проверки.", "log", "Журнал");
+    }
+    // Скорость VS Code (lib/ext/speed.js): замедление запуска, дорогие расширения, подвисания окон.
+    const sp = s.speed;
+    if (sp) {
+        const sec = (ms) => (Math.round(ms / 100) / 10).toString().replace(".", ",") + " с";
+        if (sp.regression) add("warn", "VS Code запускался медленнее обычного: " + sec(sp.regression.last) + " вместо " + sec(sp.regression.median),
+            "Часто после обновления VS Code или расширения. «Скорость VS Code» покажет, какой этап и какое расширение подорожали.", "speed", "Что тормозит");
+        if (sp.slowExt && sp.slowExt.length) add("info", "Дорогие на старте расширения: " + sp.slowExt.map((e) => e.id + " (" + sec(e.avg) + ")").join(", "),
+            "Среднее время активации по нескольким запускам. Их можно выключить для папок, где они не нужны, или вынести в отдельный процесс.", "speed", "Скорость VS Code");
+        if (sp.freezes) add("info", "Окна подвисали: " + sp.freezes, "Главный поток окна вставал больше чем на секунду или много раз дольше 200 мс. Чаще всего виновато расширение — «Скорость VS Code» и «Запущенные расширения» помогут найти какое.", "speed", "Скорость VS Code");
     }
     const d = s.design || {};
     if (d.active && d.dirty) add("info", "Профиль «" + d.active + "» изменён после применения", "Сохрани изменения в конструкторе (вкладка «Профили»), иначе профиль по контексту их не тронет, а переключение профиля их заменит.", "design", "Конструктор");

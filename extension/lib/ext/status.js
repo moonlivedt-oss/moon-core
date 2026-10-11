@@ -34,7 +34,7 @@ function createStatus(context, host) {
         if (safe) lines.push("$(shield) Сниппеты, правки и модули отключены — [выйти из безопасного режима](command:moonCore.safeMode)");
         if (pending) lines.push("$(warning) JS-сниппетов ждут одобрения: " + pending);
         if (stale) lines.push("$(warning) Окон со старым рантаймом: " + stale + " — [перезагрузить это окно](command:workbench.action.reloadWindow)");
-        lines.push("", "[Конструктор](command:moonCore.design) · [Профили](command:moonCore.profile) · [Галерея](command:moonCore.gallery) · [Доктор](command:moonCore.doctor)", "", "Клик — всё меню");
+        lines.push("", "[Конструктор](command:moonCore.design) · [Профили](command:moonCore.profile) · [Галерея](command:moonCore.gallery) · [Доктор](command:moonCore.doctor) · [Скорость](command:moonCore.speed)", "", "Клик — всё меню");
         const tooltip = lines.join("\n\n").replace(/\n\n\n\n/g, "\n\n");
         const key = text + "|" + tooltip + "|" + !!injected;
         if (key === last) return;                    // не дёргать статусбар без изменений
@@ -42,13 +42,17 @@ function createStatus(context, host) {
         item.text = text;
         const md = new vscode.MarkdownString(tooltip, true);
         // Ссылки-команды — только эти: подсказка не должна уметь больше, чем меню.
-        md.isTrusted = { enabledCommands: ["moonCore.inject", "moonCore.safeMode", "moonCore.design", "moonCore.profile", "moonCore.gallery", "moonCore.doctor", "workbench.action.reloadWindow"] };
+        md.isTrusted = { enabledCommands: ["moonCore.inject", "moonCore.safeMode", "moonCore.design", "moonCore.profile", "moonCore.gallery", "moonCore.doctor", "moonCore.speed", "workbench.action.reloadWindow"] };
         item.tooltip = md;
         item.backgroundColor = injected && !safe ? undefined : new vscode.ThemeColor("statusBarItem.warningBackground");
     };
     update();
-    const t = setInterval(update, 5000);
-    context.subscriptions.push(item, { dispose: () => clearInterval(t) }, host.onChange(update));
+    // Опрос — только у окна в фокусе: статусбар фоновых окон никто не видит, а у каждого окна
+    // свой хост и свой таймер. Окно получило фокус — сразу свежее состояние.
+    const focused = () => !vscode.window.state || vscode.window.state.focused !== false;
+    const t = setInterval(() => { if (focused()) update(); }, 5000);
+    context.subscriptions.push(item, { dispose: () => clearInterval(t) }, host.onChange(update),
+        vscode.window.onDidChangeWindowState((s) => { if (s && s.focused) update(); }));
     item.show();
 }
 
@@ -78,6 +82,7 @@ async function menu() {
         { label: "$(root-folder) Сохранить вид в проект", description: "вид будет включаться в этой папке", cmd: "moonCore.saveProjectProfile" },
         sep("Если что-то не работает"),
         { label: "$(heart) Доктор", description: "что не так и кнопки починки — начни с него", cmd: "moonCore.doctor" },
+        { label: "$(dashboard) Скорость VS Code", description: "что тормозит запуск: расширения, тяжёлые папки, настройки", cmd: "moonCore.speed" },
         { label: "$(shield) Безопасный режим", description: "временно отключить сниппеты, правки и модули — ничего не удаляя", cmd: "moonCore.safeMode" },
         { label: "$(checklist) Проверить элементы", description: "какие правки перестали работать после обновления VS Code", cmd: "moonCore.checkSelectors" },
         { label: "$(plug) Внедрить в VS Code", description: "нужно после установки и после обновления VS Code", cmd: "moonCore.inject" },

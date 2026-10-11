@@ -19,14 +19,39 @@
         stage("snippets");
         afterDS();
         // VS Code перерисовывает статусбар и титлбар — свои кнопки возвращаем на место.
-        setInterval(function () { try { ensureButtons(); } catch (e) {} }, 1500);
+        // Скрытое окно не проверяем: покажется — проверим сразу (onVisible).
+        setInterval(function () { if (!winHidden()) { try { ensureButtons(); } catch (e) {} } }, 1500);
         try { safeBadge(); } catch (e) {}
         // Контекст окна (язык, ветка...) — спросить свой хост сразу, не дожидаясь событий.
         setTimeout(function () { rpcFirst("context", {}, ownToken && hosts[ownToken] ? hosts[ownToken] : null).then(function (r) { if (r && r.ok) applyCtx(r); }); }, 1500);
     });
 
-    refreshHosts();
-    setInterval(refreshHosts, 5000);
+    // Окна VS Code создаются с backgroundThrottling: false (out/main.js) — в свёрнутом окне
+    // таймеры идут так же часто, как в активном. Поэтому периодическая работа рантайма в
+    // скрытом окне спит или идёт реже, а при показе окна догоняется сразу.
+    function winHidden() { try { return document.hidden === true; } catch (e) { return false; } }
+    function anyOpen() { return Object.keys(hosts).some(function (t) { return hosts[t].open; }); }
+    // Адреса хостов: пока ни один хост не на связи (старт окна — расширение ещё активируется),
+    // файл читается часто, с нарастающей паузой 300 мс -> 5 с; раньше — раз в 5 с, и окно
+    // подключалось к мосту через 5 с после старта, хотя хост поднимался за 2-3. Дальше — раз
+    // в 5 с, в скрытом окне — раз в 15 с.
+    var hostTries = 0;
+    function hostDelay() {
+        if (anyOpen()) { hostTries = 0; return winHidden() ? 15000 : 5000; }
+        hostTries++;
+        return Math.min(5000, Math.round(300 * Math.pow(1.4, hostTries)));
+    }
+    (function hostLoop() {
+        try { refreshHosts(); } catch (e) {}
+        setTimeout(hostLoop, hostDelay());
+    })();
+    function onVisible() {
+        if (winHidden()) return;
+        try { refreshHosts(); } catch (e) {}
+        try { if (domReady) ensureButtons(); } catch (e) {}
+        try { renderCss(); } catch (e) {}
+    }
+    try { document.addEventListener("visibilitychange", onVisible); } catch (e) {}
     setInterval(function () { Object.keys(hosts).forEach(function (t) { if (hosts[t].open) sendHello(hosts[t]); }); }, 60000);
     // VS Code перестраивает DOM — наши <style> могли выпасть из <head>. Наблюдатель за <head>
     // возвращает их сразу и без опроса; редкий таймер — страховка (и путь без MutationObserver).
@@ -46,7 +71,7 @@
             headObserved = true;
         }
     } catch (e) {}
-    setInterval(function () { try { renderCss(); } catch (e) {} }, headObserved ? 10000 : 2000);
+    setInterval(function () { if (!winHidden()) { try { renderCss(); } catch (e) {} } }, headObserved ? 10000 : 2000);
 
     timing.runtime = Math.round((now() - T0) * 10) / 10;
     var modT0 = {};
@@ -60,9 +85,20 @@
         }
         // Старым правкам без отпечатка — отпечаток (одно окно в фокусе, чтобы не дублировать).
         if (hasFocus()) setTimeout(function () { try { if (domReady) backfillPrints(); } catch (e) { report("отпечатки правок", e); } }, 3000);
+        sendTiming(false);
+        // Расширения VS Code поднимаются дольше, чем окно: метки code/didLoadExtensions и
+        // восстановления редакторов к первой отправке могут ещё не появиться. Второй раз —
+        // позже, с полным набором (хост обновляет запись этого окна, а не добавляет новую).
+        setTimeout(function () { sendTiming(true); }, 25000);
+    }
+    /** Время запуска хосту: своему (если знаем), иначе любому. final — вторая, полная отправка. */
+    function sendTiming(final) {
         var tries = 0;
         (function send() {
-            rpcAny("timing", timing).then(function (r) { if (!(r && r.ok) && ++tries < 4) setTimeout(send, 5000); },
+            var body = {};
+            Object.keys(timing).forEach(function (k) { body[k] = timing[k]; });
+            body.win = WIN_ID; body.vs = vsMarks(); body.perf = perfInfo(); body.final = !!final;
+            rpcFirst("timing", body, ownToken && hosts[ownToken] ? hosts[ownToken] : null).then(function (r) { if (!(r && r.ok) && ++tries < 4) setTimeout(send, 5000); },
                 function () { if (++tries < 4) setTimeout(send, 5000); });
         })();
     }
@@ -108,6 +144,11 @@
         fail: function (id, e) { report("выполнение", e, id); },
         /** «Стоп-кран»: выключить (true) или включить (false) все стили Moon Core в этом окне. Без аргумента — переключить. */
         panic: function (on) { return setPanic(on === undefined ? !panicOn : on); },
+        /** Отладка и тесты: пауза до следующего чтения адресов хостов (мс) и реакция на показ окна. */
+        _hostDelay: hostDelay,
+        _onVisible: onVisible,
+        /** Отладка и тесты: метки старта окна и сводка подвисаний, как их получит хост. */
+        _perf: function () { return { marks: vsMarks(), info: perfInfo() }; },
         /** Помощник модуля (null — модуль не впечатан). */
         module: moduleApi,
         /** Загрузить ленивый (или снова включить выключенный) модуль: Promise<boolean>. */

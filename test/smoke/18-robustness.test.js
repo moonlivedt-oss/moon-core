@@ -84,10 +84,32 @@ test("журнал: файл в хранилище с ротацией, секр
         const text = fs.readFileSync(f, "utf8");
         assert.ok(/password=<секрет>/.test(text) && text.indexOf("hunter22") === -1 && text.indexOf(require("os").homedir()) === -1, text);
         const chunk = "y".repeat(2000);
-        for (let i = 0; i < 700; i++) { LOG.log(chunk); if (i % 100 === 99) LOG.flushFile(); }
+        // Строки разные: одинаковые подряд журнал сводит в одну (см. тест ниже).
+        for (let i = 0; i < 700; i++) { LOG.log(i + " " + chunk); if (i % 100 === 99) LOG.flushFile(); }
         LOG.flushFile();
         assert.ok(fs.existsSync(f + ".1"), "старый файл ушёл в .1");
         assert.ok(fs.statSync(f).size <= 1024 * 1024, "текущий не больше 1 МБ");
+    } finally { LOG.setLogFile(""); }
+});
+
+test("журнал: повторы подряд сводятся в одну строку со счётчиком, ротация считает байты", () => {
+    const dir = fs.mkdtempSync(path.join(TMP, "log-rep-"));
+    const f = path.join(dir, "mooncore.log");
+    LOG.setLogFile(f);
+    try {
+        for (let i = 0; i < 50; i++) LOG.log("модули: mlbg: такой id уже есть");
+        LOG.log("другая запись");
+        LOG.flushFile();
+        const text = fs.readFileSync(f, "utf8");
+        assert.strictEqual(text.split("такой id уже есть").length - 1, 1, text);
+        assert.ok(/повторилась ещё 49 раз/.test(text), text);
+        assert.ok(text.indexOf("повторилась") < text.indexOf("другая запись"), "счётчик — до следующей записи");
+        // Кириллица: 600 000 символов — 1,2 МБ в UTF-8, файл должен уйти в .1 по байтам.
+        const ru = "я".repeat(3000);
+        for (let i = 0; i < 200; i++) { LOG.log(i + ru); if (i % 50 === 49) LOG.flushFile(); }
+        LOG.flushFile();
+        assert.ok(fs.existsSync(f + ".1"), "ротация по байтам");
+        assert.ok(fs.statSync(f).size <= 1024 * 1024 + 8192, "текущий около 1 МБ, а не 2");
     } finally { LOG.setLogFile(""); }
 });
 

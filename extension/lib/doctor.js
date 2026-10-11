@@ -19,6 +19,8 @@ const VU = require("./ext/vs-files-ui");
 
 let panel = null;
 
+function safeSummary(sp) { try { return sp.summary(); } catch (e) { log("доктор: скорость", e); return null; } }
+
 /** Снимок состояния для модели и страницы. */
 function snapshot(context, host, check) {
     const found = MH.discover(), allowedList = MH.allowed(context, found);
@@ -34,6 +36,7 @@ function snapshot(context, host, check) {
         modules: {
             found: found.map((m) => ({ id: m.id, name: m.name, version: m.version, source: MH.sourceTitle(m), allowed: allowedList.indexOf(m) !== -1, dev: MH.isDev(m) })),
             pending: pending,
+            dups: typeof MH.discoverDups === "function" ? MH.discoverDups().map((d) => ({ id: d.id, used: MH.sourceTitle({ source: d.used }), skipped: MH.sourceTitle({ source: d.skipped }) })) : [],
         },
         design: { rules: Object.keys(host.design.rules).length, settings: Object.keys(host.design.settings).length, active: ps.active, dirty: ps.dirty, profiles: ps.list.filter((p) => !p.builtin).length },
         snippets: {
@@ -50,6 +53,7 @@ function snapshot(context, host, check) {
         safe: typeof host.safeMode === "function" ? host.safeMode() : false,
         history: host.engine.history ? host.engine.history.summary() : { undo: 0, redo: 0 },
         logFile: logFilePath(),
+        speed: host.speed && typeof host.speed.summary === "function" ? safeSummary(host.speed) : null,
     };
 }
 
@@ -115,7 +119,7 @@ code,small{opacity:.75} ul{margin:0;padding-left:18px} .bar{display:flex;gap:8px
 <div class=bar>
 ${fixAll}<button data-cmd=refresh class=sec>Обновить</button><button data-cmd=check class=sec>Проверить селекторы</button>
 <button data-cmd=inject class=sec>Внедрить заново</button><button data-cmd=modules class=sec>Модули</button>
-<button data-cmd=moduleDev class=sec>Режим разработки</button><button data-cmd=log class=sec>Журнал</button>
+<button data-cmd=moduleDev class=sec>Режим разработки</button><button data-cmd=log class=sec>Журнал</button><button data-cmd=speed class=sec>Скорость VS Code</button>
 <button data-cmd=report class=sec title="Диагностика и последние строки журнала — без имени пользователя и токенов">Скопировать отчёт</button>
 <button data-cmd=export class=sec title="Отчёт, снимок состояния и копии оболочки — в папку для разбора без доступа к машине">Экспорт в файл</button>
 </div>
@@ -221,6 +225,8 @@ async function openDoctor(context, host) {
             else if (cmd === "heal") { if (lastCheck && lastCheck.heals.length) await host.offerHeals(lastCheck.heals); await check(); }
             else if (cmd === "log") showLog();
             else if (cmd === "modules") await vscode.commands.executeCommand("moonCore.modules");
+            else if (cmd === "speed") await vscode.commands.executeCommand("moonCore.speed");
+            else if (cmd === "modulesSetting") await vscode.commands.executeCommand("workbench.action.openSettings", "moonCore.modules");
             else if (cmd === "moduleDev") await vscode.commands.executeCommand("moonCore.moduleDev");
             else if (cmd === "recovery") await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(inject.recoveryPath(context)));
             else if (cmd === "design") host.toggleDesign();

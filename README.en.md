@@ -14,7 +14,7 @@ undo and safe mode · element picker · modules · zero dependencies
 [![CI](https://github.com/moonlivedt-oss/moon-core/actions/workflows/ci.yml/badge.svg)](https://github.com/moonlivedt-oss/moon-core/actions/workflows/ci.yml)
 ![version](https://img.shields.io/badge/version-0.1.0-cba6f7)
 ![vscode](https://img.shields.io/badge/VS%20Code-%5E1.85-007ACC?logo=visualstudiocode&logoColor=white)
-![tests](https://img.shields.io/badge/tests-190%20ok-a6e3a1)
+![tests](https://img.shields.io/badge/tests-207%20ok-a6e3a1)
 ![deps](https://img.shields.io/badge/dependencies-0-brightgreen)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
@@ -42,7 +42,7 @@ Separately:
 
 ```bash
 npm run build            # build the window runtime from extension/runtime/src/
-npm test                 # all tests (190 checks, no VS Code needed)
+npm test                 # all tests (207 checks, no VS Code needed)
 npm run e2e              # run in a real VS Code (downloaded once into .vscode-test/)
 ```
 
@@ -90,6 +90,7 @@ files and the editor.
 | **Modules** | Other extensions (or folders) can ship a runtime that Moon Core injects with its own block: events, requests, a data file, profile integration, hot reload in dev mode. Typed API in `extension/types/mooncore.d.ts`. |
 | **Transfer** | Export/import the whole look to a file, or sync it via Settings Sync (`moonCore.sync`). |
 | **Doctor** | One page with the full state and fix buttons, including the integrity of VS Code's own files; copies a sanitized report for issues. |
+| **VS Code speed** | What slows your startup: load and `activate()` time of every extension in this session (from VS Code's own extension-host performance marks), window startup phases, startup history with slowdown detection, main-thread freezes per window, heavy project folders, and fact-based setting advice with Apply / Revert. Measurements are kept in `mooncore-perf.json`; its `export` field (schema `moon-core/perf@1`) is meant for external tools such as VS Code Launcher. |
 
 ---
 
@@ -139,7 +140,7 @@ No dependencies, no `npm install` — the scripts just call `node` (Node 22+).
 
 ```bash
 npm run build            # build the window runtime from its parts
-npm test                 # build check + smoke (145) + window runtime (45), no VS Code needed
+npm test                 # build check + smoke (159) + window runtime (48), no VS Code needed
 npm run package          # build dist/moon-core-<version>.vsix
 npm run e2e              # real VS Code in .vscode-test/ (downloads it once)
 node test/serve.js       # http://localhost:8792/test/fixture.html — runtime on a mock UI with a real bridge

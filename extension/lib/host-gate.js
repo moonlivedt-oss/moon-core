@@ -13,6 +13,7 @@ const S = require("./snippets");
 const CMD = require("./commands");
 const KEYS = require("./keys");
 const AU = require("./audit");
+const PM = require("./perf-model");
 const { log, showLog } = require("./log");
 
 const clip = (s, n) => String(s == null ? "" : s).replace(/[\u0000-\u0008\u000B-\u001F]/g, " ").slice(0, n);
@@ -33,7 +34,16 @@ class GatePart {
             Object.keys(body.stages).slice(0, 16).forEach((k) => { const v = num(body.stages[k]); if (/^[a-z][\w-]{0,31}$/i.test(k) && v != null) stages[k] = v; });
         }
         this.lastTiming = { at: Date.now(), runtime: num(body && body.runtime), modules: mods, skipped: skipped, failed: failed, stages: stages };
-        if (failed.length && typeof this.onModulesFailed === "function") {
+        // Скорость VS Code: метки старта окна и подвисания (lib/ext/speed.js ведёт по ним историю).
+        const win = /^[0-9a-f]{16}$/.test(String(body && body.win)) ? String(body.win) : "";
+        const perf = PM.cleanPerf(body && body.perf);
+        this.lastTiming.win = win;
+        if (typeof this.onPerfTiming === "function") {
+            try { this.onPerfTiming({ win: win, final: !!(body && body.final), vs: PM.cleanMarks(body && body.vs), perf: perf, runtime: this.lastTiming.runtime }); }
+            catch (e) { log("скорость: время окна", e); }
+        }
+        // Вторая, полная отправка (final) несёт те же модули — чинить их второй раз не нужно.
+        if (failed.length && !(body && body.final) && typeof this.onModulesFailed === "function") {
             Promise.resolve().then(() => this.onModulesFailed(failed)).catch((e) => log("модули не загрузились", e));
         }
         return { ok: true };

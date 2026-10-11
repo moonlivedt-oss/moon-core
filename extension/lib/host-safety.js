@@ -18,6 +18,7 @@ const { backupsDir } = require("./storage");
 const fs = require("fs");
 const path = require("path");
 const S = require("./snippets");
+const { cleanPerf } = require("./perf-model");
 
 const WIN_ID_RE = /^[0-9a-f]{8,32}$/;
 const WINDOW_TTL_MS = 150000;        // окно шлёт пульс раз в минуту; молчит дольше — считаем закрытым
@@ -121,18 +122,18 @@ class SafetyPart {
         if (!WIN_ID_RE.test(win)) return { ok: false, error: "bad window id" };
         if (!this.windows) this.windows = new Map();
         if (!this.windows.has(win) && this.windows.size >= 64) return { ok: false, error: "too many windows" };
-        this.windows.set(win, { version: clip(body.version, 40), rev: clip(body.rev, 40), at: Date.now() });
+        this.windows.set(win, { version: clip(body.version, 40), rev: clip(body.rev, 40), at: Date.now(), perf: cleanPerf(body.perf) });
         return { ok: true, version: this.extVersion() };
     }
 
     extVersion() { try { return String(this.context.extension.packageJSON.version || ""); } catch (e) { return ""; } }
 
-    /** Окна на связи: [{ version, stale }] (stale — рантайм окна не той версии, что расширение). */
+    /** Окна на связи: [{ win, version, stale, perf }] (stale — рантайм окна не той версии, что расширение; perf — подвисания и память). */
     windowsInfo() {
         const now = Date.now(), ver = this.extVersion(), out = [];
         (this.windows || new Map()).forEach((w, id) => {
             if (now - w.at > WINDOW_TTL_MS) { this.windows.delete(id); return; }
-            out.push({ version: w.version, stale: !!ver && !!w.version && w.version !== ver });
+            out.push({ win: id, version: w.version, stale: !!ver && !!w.version && w.version !== ver, perf: w.perf || null });
         });
         return out;
     }

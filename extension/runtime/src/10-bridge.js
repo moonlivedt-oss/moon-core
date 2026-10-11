@@ -77,9 +77,9 @@
         on(rec, "vs", function (d) { deliverVs(rec, d); });
         on(rec, "moduleSet", function (d) { applyModuleSet(rec, d); });
     }
-    /** Пульс: хост узнаёт, что окно живо и какой в нём рантайм (Доктор покажет окна со старым). */
+    /** Пульс: хост узнаёт, что окно живо и какой в нём рантайм (Доктор покажет окна со старым), и сводку подвисаний окна. */
     function sendHello(rec) {
-        try { rpc(rec, "hello", { win: WIN_ID, version: BOOT.version || "", rev: rev, safe: SAFE }); } catch (e) {}
+        try { rpc(rec, "hello", { win: WIN_ID, version: BOOT.version || "", rev: rev, safe: SAFE, perf: perfInfo() }); } catch (e) {}
     }
     function on(rec, ev, fn) {
         rec.es.addEventListener(ev, function (e) {

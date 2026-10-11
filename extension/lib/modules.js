@@ -120,18 +120,22 @@ function fromFolder(dir) {
 
 /**
  * Свести найденные модули: дубли id отбрасываются (первый выигрывает), лимиты по числу.
- * Возвращает { modules, errors }.
+ * Возвращает { modules, errors, dups } (dups — [{ id, used, skipped }]: какой источник взят, какой пропущен).
  */
 function collect(results) {
-    const modules = [], errors = [], seen = new Set();
+    const modules = [], errors = [], dups = [], seen = new Map();
     results.forEach((r) => {
         if (!r || !r.ok) { if (r && r.error) errors.push(r.error); return; }
-        if (seen.has(r.module.id)) { errors.push(r.module.id + ": такой id уже есть (" + r.module.source + " пропущен)"); return; }
+        if (seen.has(r.module.id)) {
+            errors.push(r.module.id + ": такой id уже есть (" + r.module.source + " пропущен)");
+            dups.push({ id: r.module.id, used: seen.get(r.module.id), skipped: r.module.source });
+            return;
+        }
         if (modules.length >= LIMITS.MAX_MODULES) { errors.push(r.module.id + ": модулей больше " + LIMITS.MAX_MODULES); return; }
-        seen.add(r.module.id);
+        seen.set(r.module.id, r.module.source);
         modules.push(r.module);
     });
-    return { modules: modules, errors: errors };
+    return { modules: modules, errors: errors, dups: dups };
 }
 
 /**

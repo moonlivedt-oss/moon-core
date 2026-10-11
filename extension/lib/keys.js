@@ -32,6 +32,9 @@ const K = {
     UI_INLINE_FOR: "mooncore.uiInlineFor",
     SAFE_MODE: "mooncore.safeMode",                          // true — безопасный режим (без сниппетов, правок и модулей)
     SEEN_VERSION: "mooncore.seenVersion",                    // версия расширения, о которой уже рассказали «Что нового»
+    SPEED_UNDO: "mooncore.speed.applied",                    // id совета -> { key, target, prev, had, folder } — чтобы «Вернуть как было»
+    SPEED_NOTIFIED: "mooncore.speed.notifiedAt",             // когда в последний раз говорили о замедлении запуска (не чаще раза в сутки)
+    DEEP_BUNDLE: "mooncore.deepBundle",                      // { key: размер и время бандла воркбенча, di, diSupported } — чтобы не читать 20 МБ в каждом окне
 };
 
 /** Ключи-разрешения: их сбрасывает «Отозвать все разрешения» (журнал остаётся — в нём сам отзыв). */

@@ -14,6 +14,7 @@ const S = require("../snippets");
 const { snippetsDir, metaFile } = require("../storage");
 const { log } = require("../log");
 const { statKey } = require("../fsx");
+const KEYS = require("../keys");
 
 function deepFiles() {
     const appRoot = vscode.env && vscode.env.appRoot;
@@ -42,6 +43,27 @@ function webviewCss(context) {
 }
 
 let deepCache = { key: "", v: null };
+
+/**
+ * Есть ли в бандле воркбенча крючок сервисов и можно ли его поставить. Бандл — около 20 МБ:
+ * его чтение и разбор стоили каждому окну ~50 мс и ~40 МБ памяти при активации. Ответ зависит
+ * только от файла, поэтому он запоминается в globalState по размеру и времени изменения —
+ * окна и сеансы после первого бандл не читают, пока VS Code его не обновит.
+ */
+function bundleFacts(context, file) {
+    const key = statKey([file]);
+    const gs = context && context.globalState;
+    const saved = gs ? gs.get(KEYS.DEEP_BUNDLE) : null;
+    if (saved && saved.key === key && key !== "-") return { di: saved.di === true, diSupported: saved.diSupported !== false };
+    let di = false, diSupported = true;
+    try {
+        const t = fs.readFileSync(file, "utf8");
+        di = DP.hasDi(t);
+        if (!di) diSupported = DP.patchBundle(t).ok;
+    } catch (e) { diSupported = false; }
+    if (gs && key !== "-") Promise.resolve(gs.update(KEYS.DEEP_BUNDLE, { key: key, di: di, diSupported: diSupported })).catch(() => {});
+    return { di: di, diSupported: diSupported };
+}
 function resetDeepCache() { deepCache = { key: "", v: null }; }
 
 /** {di, main, diSupported, want, ok}: что стоит сейчас и совпадает ли это с настройками. Бандл большой — кэш по размеру и времени. */
@@ -51,12 +73,9 @@ function deepState(context) {
     const css = webviewCss(context);
     const key = statKey([f.bundle, f.main, f.mjs, f.webview]) + "|" + want.di + want.main + want.webview + "|" + W.sha256(css).slice(0, 16);
     if (deepCache.key === key) return deepCache.v;
-    let di = false, main = false, diSupported = true;
-    try {
-        const t = fs.readFileSync(f.bundle, "utf8");
-        di = DP.hasDi(t);
-        if (!di) diSupported = DP.patchBundle(t).ok;
-    } catch (e) { diSupported = false; }
+    const b = bundleFacts(context, f.bundle);
+    const di = b.di, diSupported = b.diSupported;
+    let main = false;
     try { main = DP.hasMain(fs.readFileSync(f.main, "utf8")) && fs.existsSync(f.mjs); } catch (e) {}
     // Стили webview: в файле ровно нынешний CSS сниппетов (или ничего, если выключено). Файл,
     // который править нельзя (изменён другой программой), «не совпадает» не считается.

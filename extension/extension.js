@@ -6,7 +6,8 @@
 //    - lib/bridge.js    — мост окно <-> хост (HTTP на 127.0.0.1 + SSE);
 //    - lib/host.js      — сниппеты CSS/JS, живой предпросмотр, пипетка, конструктор, проверки;
 //    - lib/modules.js   — модули: чужие рантаймы, которые Moon Core впечатывает своим блоком;
-//    - lib/ext/         — статусбар и меню, дерево сниппетов, вид окна, слежение за модулями;
+//    - lib/ext/         — статусбар и меню, дерево сниппетов, вид окна, слежение за модулями,
+//                         «Скорость VS Code» (замеры старта и расширений, советы);
 //    - runtime/         — то, что исполняется в окне VS Code.
 //  Здесь — только активация и регистрация команд.
 // ============================================================
@@ -29,6 +30,7 @@ const { createLookView } = require("./lib/ext/look-tree");
 const X = require("./lib/ext/extras");
 const VU = require("./lib/ext/vs-files-ui");
 const { createSnippetCompletion } = require("./lib/ext/snippet-complete");
+const { createSpeed } = require("./lib/ext/speed");
 
 let host = null;
 
@@ -109,6 +111,8 @@ function registerCommands(context, refreshModules) {
     reg("moonCore.importCustomCss", () => X.importCustomCssCommand(host));
     reg("moonCore.webviewStyles", () => VU.webviewStylesCommand(context, host));
     reg("moonCore.restoreSnippets", () => host.restoreSnippetsCommand());
+    reg("moonCore.speed", () => host.speed.open());
+    reg("moonCore.speedExport", () => host.speed.exportFile());
     reg("moonCore.openFolder", () => vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(host.dir)));
 }
 
@@ -118,6 +122,7 @@ function activate(context) {
         setLogFile(path.join(storageDir(context), "mooncore.log"));
         setLogLevel(vscode.workspace.getConfiguration("moonCore").get("logLevel", "all"));
         host = new Host(context);
+        createSpeed(context, host);
         createSnippetView(context, host);
         createLookView(context, host);
         X.createSnippetDiagnostics(context, host);

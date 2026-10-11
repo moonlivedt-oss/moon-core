@@ -97,6 +97,15 @@ exports.run = async function () {
             const tm = await waitFor(() => host.lastTiming, 20000, 500);
             step("время запуска пришло, модуль не упал", !!tm && !(tm.failed || []).length && typeof tm.modules[MOD] === "number", tm);
 
+            // Скорость VS Code: метки процесса расширений видны изнутри (без патчей), а окно
+            // присылает метки старта самого VS Code (code/*) — на этом стоит вся страница.
+            const live = host.speed ? host.speed.liveTable() : [];
+            const self = live.find((r) => r.id.toLowerCase() === "moonlivedt.moon-core");
+            step("скорость: активации расширений из меток процесса расширений", live.length > 0 && !!self && self.done && self.total >= 0,
+                { count: live.length, self: self || null, top: live.slice(0, 3).map((r) => r.id + " " + r.total + " мс") });
+            const perfStart = await waitFor(() => { const h = host.speed && host.speed.store.load(); return h && h.starts.length && h.starts[h.starts.length - 1].ready ? h.starts[h.starts.length - 1] : null; }, 20000, 500);
+            step("скорость: окно прислало метки старта VS Code, запуск в истории", !!perfStart && perfStart.ready > 0, perfStart);
+
             // Конструктор: правка -> CSS в окне. Окно отвечает зондом, что видит.
             const r = await host.onDesign({ ops: [{ op: "set", selector: ".part.statusbar", prop: "opacity", value: 0.5, label: "e2e" }] });
             step("правка конструктора записана", r.ok, r.error || null);
