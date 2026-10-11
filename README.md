@@ -1,6 +1,6 @@
 <div align="center">
 
-**Русский** · [English](README.en.md)
+**Русский** / [English](README.en.md)
 
 <img src="extension/media/icon.svg" alt="Логотип Moon Core" width="96">
 
@@ -8,8 +8,8 @@
 
 ### Переделай интерфейс VS Code под себя: кликни по элементу — убери, увеличь, перекрась
 
-Конструктор интерфейса · профили вида и галерея стилей · живые CSS/JS-сниппеты<br>
-скорость VS Code: что тормозит запуск · отмена правок и безопасный режим · пипетка · модули · ноль зависимостей
+Конструктор интерфейса / профили вида и галерея стилей / живые CSS/JS-сниппеты<br>
+скорость VS Code: что тормозит запуск / отмена правок и безопасный режим / пипетка / модули / ноль зависимостей
 
 [![CI](https://github.com/moonlivedt-oss/moon-core/actions/workflows/ci.yml/badge.svg)](https://github.com/moonlivedt-oss/moon-core/actions/workflows/ci.yml)
 ![version](https://img.shields.io/badge/version-0.1.0-cba6f7)
@@ -18,7 +18,7 @@
 ![deps](https://img.shields.io/badge/зависимостей-0-brightgreen)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
-<sub>Собственный упаковщик .vsix · установка одной командой · снятие возвращает оболочку байт в байт</sub>
+<sub>Собственный упаковщик .vsix / установка одной командой / снятие возвращает оболочку байт в байт</sub>
 
 </div>
 
@@ -840,5 +840,5 @@ MIT — см. [LICENSE](LICENSE).
 <div align="center">
   <sub><b>Moon Core</b> — интерфейс VS Code под себя: кликом по элементу, с отменой и без зависимостей.</sub>
   <br>
-  <sub>Нашёл баг или есть идея? — <a href="https://github.com/moonlivedt-oss/moon-core/issues">Issues</a> · <a href="https://github.com/moonlivedt-oss/moon-core/discussions">Discussions</a></sub>
+  <sub>Нашёл баг или есть идея? — <a href="https://github.com/moonlivedt-oss/moon-core/issues">Issues</a> / <a href="https://github.com/moonlivedt-oss/moon-core/discussions">Discussions</a></sub>
 </div>

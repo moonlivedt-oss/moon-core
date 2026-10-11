@@ -1,6 +1,6 @@
 <div align="center">
 
-[Русский](README.md) · **English**
+[Русский](README.md) / **English**
 
 <img src="extension/media/icon.svg" alt="Moon Core logo" width="96">
 
@@ -8,8 +8,8 @@
 
 ### Reshape the VS Code interface: click any element to hide, resize or recolor it
 
-UI designer · look profiles and a style gallery · live CSS/JS snippets<br>
-undo and safe mode · element picker · modules · zero dependencies
+UI designer / look profiles and a style gallery / live CSS/JS snippets<br>
+undo and safe mode / element picker / modules / zero dependencies
 
 [![CI](https://github.com/moonlivedt-oss/moon-core/actions/workflows/ci.yml/badge.svg)](https://github.com/moonlivedt-oss/moon-core/actions/workflows/ci.yml)
 ![version](https://img.shields.io/badge/version-0.1.0-cba6f7)
@@ -18,7 +18,7 @@ undo and safe mode · element picker · modules · zero dependencies
 ![deps](https://img.shields.io/badge/dependencies-0-brightgreen)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
-<sub>Own .vsix packer · one-command install · removal restores the VS Code shell byte for byte</sub>
+<sub>Own .vsix packer / one-command install / removal restores the VS Code shell byte for byte</sub>
 
 </div>
 
@@ -186,5 +186,5 @@ MIT — see [LICENSE](LICENSE).
 <div align="center">
   <sub><b>Moon Core</b> — the VS Code interface your way: click an element, undo anything, zero dependencies.</sub>
   <br>
-  <sub>Found a bug or have an idea? — <a href="https://github.com/moonlivedt-oss/moon-core/issues">Issues</a> · <a href="https://github.com/moonlivedt-oss/moon-core/discussions">Discussions</a></sub>
+  <sub>Found a bug or have an idea? — <a href="https://github.com/moonlivedt-oss/moon-core/issues">Issues</a> / <a href="https://github.com/moonlivedt-oss/moon-core/discussions">Discussions</a></sub>
 </div>
