@@ -27,14 +27,14 @@ function createStatus(context, host) {
         // Подсказка со ссылками: из неё можно сразу открыть нужное, не заходя в меню.
         const lines = [
             "**Moon Core**" + (safe ? " — безопасный режим" : ""), "",
-            (injected ? "$(pass) Встроен в VS Code" : "$(warning) Не встроен — [встроить](command:moonCore.inject)") + " · окон на связи: " + b.streams,
+            (injected ? "$(pass) Встроен в VS Code" : "$(warning) Не встроен — [встроить](command:moonCore.inject)") + " | окон на связи: " + b.streams,
             "Вид: " + (ps.active ? "профиль «" + ps.active.replace(/[\[\]()*_`\\]/g, "") + "»" + (ps.dirty ? " (изменён)" : "") : "правок " + host.engine.editCount()) +
-                " · сниппетов " + host.state.snippets.length + " из " + host.list.length,
+                " | сниппетов " + host.state.snippets.length + " из " + host.list.length,
         ];
         if (safe) lines.push("$(shield) Сниппеты, правки и модули отключены — [выйти из безопасного режима](command:moonCore.safeMode)");
         if (pending) lines.push("$(warning) JS-сниппетов ждут одобрения: " + pending);
         if (stale) lines.push("$(warning) Окон со старым рантаймом: " + stale + " — [перезагрузить это окно](command:workbench.action.reloadWindow)");
-        lines.push("", "[Конструктор](command:moonCore.design) · [Профили](command:moonCore.profile) · [Галерея](command:moonCore.gallery) · [Доктор](command:moonCore.doctor) · [Скорость](command:moonCore.speed)", "", "Клик — всё меню");
+        lines.push("", "[Конструктор](command:moonCore.design) | [Профили](command:moonCore.profile) | [Галерея](command:moonCore.gallery) | [Доктор](command:moonCore.doctor) | [Скорость](command:moonCore.speed)", "", "Клик — всё меню");
         const tooltip = lines.join("\n\n").replace(/\n\n\n\n/g, "\n\n");
         const key = text + "|" + tooltip + "|" + !!injected;
         if (key === last) return;                    // не дёргать статусбар без изменений

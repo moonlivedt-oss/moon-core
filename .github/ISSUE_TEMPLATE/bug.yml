@@ -44,7 +44,7 @@ body:
     id: vscode-version
     attributes:
       label: Версия VS Code (или форка)
-      placeholder: "1.139.1 · VS Code / Cursor / VSCodium"
+      placeholder: "1.139.1 | VS Code / Cursor / VSCodium"
     validations:
       required: true
   - type: dropdown

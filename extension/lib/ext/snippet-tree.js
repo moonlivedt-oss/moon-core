@@ -18,7 +18,7 @@ class SnippetTree {
         const item = new vscode.TreeItem(s.id, vscode.TreeItemCollapsibleState.None);
         item.checkboxState = s.enabled ? vscode.TreeItemCheckboxState.Checked : vscode.TreeItemCheckboxState.Unchecked;
         const pending = (this.host.jsPending || []).some((p) => p.id === s.id);
-        item.description = s.error ? s.error : (s.kind === "js" ? "JS" : "CSS") + " · " + fmtSize(s.size) + (pending ? " · ждёт одобрения" : "");
+        item.description = s.error ? s.error : (s.kind === "js" ? "JS" : "CSS") + " | " + fmtSize(s.size) + (pending ? " | ждёт одобрения" : "");
         item.tooltip = s.file;
         item.iconPath = new vscode.ThemeIcon(s.error || pending ? "warning" : s.kind === "js" ? "symbol-event" : "symbol-color");
         item.contextValue = "snippet";
